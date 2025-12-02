@@ -516,41 +516,43 @@ void updateDisplay()
   }
   else if (menu == MENU_NOW_PLAYING)
   {
-    // Full redraw for now playing (doesn't scroll)
+    // NOW PLAYING always needs full content redraw when song changes
+    // Clear content area (but not header/footer unless fullRedraw)
+    display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
+    
+    int centerY = 80;
+    
+    if (strlen(title) > 0) {
+      display.setTextSize(2);
+      display.setTextColor(COLOR_TEXT);
+      
+      String titleStr = String(title);
+      int charsPerLine = 16;
+      
+      for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
+        String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
+        drawCenteredText(chunk.c_str(), centerY + line * 20, 2);
+        titleStr = titleStr.substring(chunk.length());
+      }
+      
+      centerY += 70;
+    }
+    
+    if (strlen(artist) > 0) {
+      display.setTextSize(1);
+      display.setTextColor(COLOR_DISABLED);
+      drawCenteredText(artist, centerY);
+      centerY += 16;
+    }
+    
+    if (strlen(album) > 0) {
+      display.setTextSize(1);
+      display.setTextColor(COLOR_DISABLED);
+      drawCenteredText(album, centerY);
+    }
+    
+    // Only redraw controls on fullRedraw
     if (fullRedraw) {
-      display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
-      
-      int centerY = 80;
-      
-      if (strlen(title) > 0) {
-        display.setTextSize(2);
-        display.setTextColor(COLOR_TEXT);
-        
-        String titleStr = String(title);
-        int charsPerLine = 16;
-        
-        for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
-          String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
-          drawCenteredText(chunk.c_str(), centerY + line * 20, 2);
-          titleStr = titleStr.substring(chunk.length());
-        }
-        
-        centerY += 70;
-      }
-      
-      if (strlen(artist) > 0) {
-        display.setTextSize(1);
-        display.setTextColor(COLOR_DISABLED);
-        drawCenteredText(artist, centerY);
-        centerY += 16;
-      }
-      
-      if (strlen(album) > 0) {
-        display.setTextSize(1);
-        display.setTextColor(COLOR_DISABLED);
-        drawCenteredText(album, centerY);
-      }
-      
       display.setTextSize(1);
       display.setTextColor(COLOR_TEXT);
       display.setCursor(10, SCREEN_HEIGHT - 30);

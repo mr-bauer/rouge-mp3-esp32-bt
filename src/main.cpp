@@ -11,6 +11,7 @@
 #include "AudioManager.h"
 #include "Spinner.h"
 #include "State.h"
+#include "Haptics.h"
 
 // Watchdog timeout (30 seconds)
 #define WDT_TIMEOUT 30
@@ -40,6 +41,7 @@ void setup()
 
     // Initialize hardware modules
     initDisplay();
+    initHaptics();
     initButtons();
     initEncoder();
 

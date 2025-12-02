@@ -1,6 +1,7 @@
 #include "EncoderModule.h"
 #include "State.h"
 #include "Display.h"
+#include "Haptics.h"
 #include <RotaryEncoder.h>
 
 #define ENCODER_PIN_A 26
@@ -71,6 +72,9 @@ void updateEncoder()
     
     lastPos = newPos;
     lastValidPos = newPos;
+    
+    // NEW: Haptic feedback on encoder tick
+    hapticEncoderTick();
 
     // Take mutex to safely update shared variables
     if (xSemaphoreTake(displayMutex, 10)) {

@@ -1,4 +1,5 @@
 #include "State.h"
+#include "Haptics.h"
 #include <Arduino.h>
 
 // Bluetooth status
@@ -78,6 +79,7 @@ void navigateToMenu(MenuType menu) {
   // Save current position to stack (for back button)
   if (currentMenu != menu) {
     menuStack.push_back({currentMenu, menuIndex});
+    hapticMenuTransition();  // NEW: Haptic on menu change
   }
   
   currentMenu = menu;

@@ -3,6 +3,7 @@
 #include "Display.h"
 #include "AudioManager.h"
 #include "State.h"
+#include "Haptics.h"
 
 void handleButtonPress(int buttonIndex)
 {
@@ -31,10 +32,13 @@ void handleCenter()
       
       if (!item.enabled) {
         Serial.println("⚠️ Menu item disabled");
+        hapticError();  // NEW: Error feedback
         return;
       }
       
       Serial.printf("Selected: %s -> %d\n", item.label.c_str(), item.action);
+      
+      hapticSelection();  // NEW: Confirm selection
       
       // Handle Bluetooth menu actions
       if (currentMenu == MENU_BLUETOOTH) {
@@ -46,20 +50,15 @@ void handleCenter()
           disconnectBluetooth();
         }
         
-        // If it's just a status item, don't navigate
         if (item.label.find("Status:") == 0) {
-          // Just show status, don't do anything
           return;
         }
         
-        // Rebuild menu to show new state
         buildBluetoothMenu();
         displayNeedsUpdate = true;
       }
       
-      // Handle settings menu actions
       if (currentMenu == MENU_SETTINGS) {
-        // Toggle settings (future implementation)
         Serial.println("Settings action (not implemented)");
         return;
       }
@@ -75,8 +74,10 @@ void handleCenter()
   if (currentMenu == MENU_NOW_PLAYING) {
     if (player_state == STATE_PLAYING) {
       pausePlayback();
+      hapticSelection();  // NEW
     } else if (player_state == STATE_PAUSED) {
       resumePlayback();
+      hapticSelection();  // NEW
     }
     displayNeedsUpdate = true;
     return;
@@ -88,11 +89,14 @@ void handleCenter()
     if (artistIndex >= 0 && artistIndex < (int)artists.size()) {
       currentArtist = artists[artistIndex];
       
+      hapticSelection();  // NEW
+      
       if (buildAlbumList(currentArtist)) {
         navigateToMenu(MENU_ALBUM_LIST);
         albumIndex = 0;
       } else {
         Serial.println("⚠️ Failed to load albums");
+        hapticError();  // NEW
       }
     } else {
       Serial.println("❌ Invalid artist index!");
@@ -103,11 +107,14 @@ void handleCenter()
     if (albumIndex >= 0 && albumIndex < (int)albums.size()) {
       currentAlbum = albums[albumIndex];
       
+      hapticSelection();  // NEW
+      
       if (buildSongList(currentArtist, currentAlbum)) {
         navigateToMenu(MENU_SONG_LIST);
         songIndex = 0;
       } else {
         Serial.println("⚠️ Failed to load songs");
+        hapticError();  // NEW
       }
     } else {
       Serial.println("❌ Invalid album index!");
@@ -116,6 +123,7 @@ void handleCenter()
   else if (currentMenu == MENU_SONG_LIST)
   {
     if (songIndex >= 0 && songIndex < (int)songs.size()) {
+      hapticSelection();  // NEW
       playCurrentSong(false);
       navigateToMenu(MENU_NOW_PLAYING);
     } else {
@@ -128,7 +136,7 @@ void handleCenter()
 
 void handleLeft()
 {
-  // Back button
+  // Back button (already has haptic from button handler)
   navigateBack();
   displayNeedsUpdate = true;
 }
