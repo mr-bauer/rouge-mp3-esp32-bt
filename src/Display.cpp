@@ -1,7 +1,9 @@
 #include "Display.h"
 #include <cstring>
 
-Adafruit_SSD1327 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// Create TFT instance using HSPI
+SPIClass hspi(HSPI);
+Adafruit_ST7789 display = Adafruit_ST7789(&hspi, TFT_CS, TFT_DC, TFT_RST);
 
 volatile bool displayNeedsUpdate = false;
 SemaphoreHandle_t displayMutex = NULL;
@@ -36,19 +38,40 @@ void displayTask(void *param) {
 
 void initDisplay()
 {
-  pinMode(NEOPIXEL_I2C_POWER, OUTPUT);
-  digitalWrite(NEOPIXEL_I2C_POWER, HIGH);
-  delay(10);
+  Serial.println("🖥️  Initializing ST7789 display (HSPI)...");
   
-  Wire.begin(OLED_SDA, OLED_SCL);
-  Wire.setClock(400000);
+  // Initialize HSPI with custom pins
+  hspi.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);  // SCK, MISO (not used), MOSI, CS
   
-  if (!display.begin(0x3D)) {
-    Serial.println("❌ OLED not found!");
-  } else {
-    Serial.println("✅ Display initialized");
-  }
-
+  // Initialize display
+  display.init(SCREEN_WIDTH, SCREEN_HEIGHT);
+  
+  // Set rotation (0 degrees as requested)
+  display.setRotation(3);
+  
+  // Clear screen
+  display.fillScreen(COLOR_BG);
+  
+  // Set text defaults
+  display.setTextColor(COLOR_TEXT);
+  display.setTextSize(2);
+  display.setTextWrap(false);
+  
+  // Show splash screen
+  display.setCursor(30, 100);
+  display.setTextSize(3);
+  display.println("ROUGE");
+  display.setCursor(50, 130);
+  display.setTextSize(2);
+  display.println("MP3 Player");
+  display.setCursor(60, 160);
+  display.setTextSize(1);
+  display.println("Loading...");
+  
+  delay(1000);
+  
+  Serial.println("✅ ST7789 Display initialized");
+  
   displayMutex = xSemaphoreCreateMutex();
   
   if (displayMutex == NULL) {
@@ -84,17 +107,18 @@ void drawCenteredText(const char* text, int y, uint8_t textSize)
   display.print(text);
 }
 
-void drawMenuItem(const char* text, int y, bool selected)
+void drawMenuItem(const char* text, int y, bool selected, bool disabled)
 {
   if (!text) return;
   
   display.setTextWrap(false);
-  display.setTextSize(1);
+  display.setTextSize(2);
   
-  const int padding = 4;
-  const int arrowWidth = 6;
-  const int maxWidth = display.width() - padding * 2 - arrowWidth - 2;
+  const int padding = 8;
+  const int maxWidth = display.width() - padding * 2;
+  const int itemHeight = 36;
   
+  // Truncate long text
   char shown[64];
   strncpy(shown, text, 60);
   shown[60] = '\0';
@@ -103,8 +127,8 @@ void drawMenuItem(const char* text, int y, bool selected)
   uint16_t w, h;
   display.getTextBounds(shown, 0, y, &x1, &y1, &w, &h);
   
-  if (w > maxWidth) {
-    int maxChars = (maxWidth / 6) - 3;
+  if (w > maxWidth - 20) {
+    int maxChars = 20;  // ~20 chars at size 2
     if (maxChars > 0 && maxChars < 60) {
       shown[maxChars] = '.';
       shown[maxChars + 1] = '.';
@@ -113,29 +137,44 @@ void drawMenuItem(const char* text, int y, bool selected)
     }
   }
   
+  // Draw selection background
   if (selected) {
-    display.fillRect(0, y - 3, display.width(), 14, SSD1327_WHITE);
-    display.setTextColor(SSD1327_BLACK);
+    display.fillRoundRect(4, y - 4, display.width() - 8, itemHeight, 4, COLOR_SELECTED);
+    display.setTextColor(COLOR_BG);
+  } else if (disabled) {
+    display.setTextColor(COLOR_DISABLED);
   } else {
-    display.setTextColor(SSD1327_WHITE);
+    display.setTextColor(COLOR_TEXT);
   }
   
-  display.setCursor(padding, y);
+  display.setCursor(padding, y + 4);
   display.print(shown);
-  display.setCursor(display.width() - arrowWidth, y);
-  display.print(">");
   
-  display.setTextColor(SSD1327_WHITE);
+  // Draw arrow for enabled items
+  if (!disabled && !selected) {
+    display.setCursor(display.width() - 20, y + 4);
+    display.print(">");
+  }
+  
+  display.setTextColor(COLOR_TEXT);
 }
 
 void drawUI()
 {
-  display.clearDisplay();
-  drawCenteredText("ROUGE MP3 PLAYER", 4);
-  display.drawLine(0, 14, 127, 14, SSD1327_WHITE);
-  display.drawLine(0, 112, 127, 112, SSD1327_WHITE);
-  drawCenteredText(btStatus.c_str(), 116);
-  display.display();
+  display.fillScreen(COLOR_BG);
+  
+  // Header
+  display.fillRect(0, 0, SCREEN_WIDTH, 40, COLOR_ACCENT);
+  display.setTextColor(COLOR_HEADER);
+  drawCenteredText("ROUGE MP3 PLAYER", 12, 2);
+  
+  // Footer with BT status
+  display.fillRect(0, SCREEN_HEIGHT - 30, SCREEN_WIDTH, 30, COLOR_ACCENT);
+  display.setTextColor(COLOR_HEADER);
+  display.setTextSize(1);
+  drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 18);
+  
+  display.setTextColor(COLOR_TEXT);
 }
 
 int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart, int listSize, const int maxDisplay)
@@ -162,7 +201,7 @@ int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart, int li
       // Cursor can move down within window
       newWindowStart = lastWinStart;
     } else {
-      // Cursor at bottom (position 4), scroll the list
+      // Cursor at bottom, scroll the list
       newWindowStart = lastWinStart + delta;
     }
   } else if (delta < 0) {
@@ -171,7 +210,7 @@ int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart, int li
       // Cursor can move up within window
       newWindowStart = lastWinStart;
     } else {
-      // Cursor at top (position 0), scroll the list
+      // Cursor at top, scroll the list
       newWindowStart = lastWinStart + delta;
     }
   }
@@ -203,55 +242,124 @@ void updateDisplay()
   strncpy(artist, currentArtist.c_str(), 127);
   strncpy(album, currentAlbum.c_str(), 127);
   
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1327_WHITE);
-  display.setTextWrap(false);
-
-  // Draw header based on menu type
-  const char* headerText = "ROUGE MP3";
-  switch(menu) {
-    case MENU_MAIN: headerText = "Main Menu"; break;
-    case MENU_MUSIC: headerText = "Music"; break;
-    case MENU_SETTINGS: headerText = "Settings"; break;
-    case MENU_BLUETOOTH: headerText = "Bluetooth"; break;
-    case MENU_ARTIST_LIST: headerText = "Artists"; break;
-    case MENU_ALBUM_LIST: headerText = "Albums"; break;
-    case MENU_SONG_LIST: headerText = "Songs"; break;
-    case MENU_NOW_PLAYING: headerText = "Now Playing"; break;
+  // Track what was previously displayed
+  static MenuType lastMenu = (MenuType)-1;  // Invalid initial state
+  static int lastDisplayedIndex = -1;
+  
+  // Full redraw if menu changed (will be true on first call)
+  bool fullRedraw = (menu != lastMenu);
+  lastMenu = menu;
+  
+  if (fullRedraw) {
+    display.fillScreen(COLOR_BG);
   }
   
-  drawCenteredText(headerText, 8);
-  display.drawLine(0, 16, SCREEN_WIDTH, 16, SSD1327_WHITE);
+  display.setTextSize(2);
+  display.setTextColor(COLOR_TEXT);
+  display.setTextWrap(false);
+
+  // Draw header (only on full redraw)
+  if (fullRedraw) {
+    const char* headerText = "ROUGE MP3";
+    switch(menu) {
+      case MENU_MAIN: headerText = "Main Menu"; break;
+      case MENU_MUSIC: headerText = "Music"; break;
+      case MENU_SETTINGS: headerText = "Settings"; break;
+      case MENU_BLUETOOTH: headerText = "Bluetooth"; break;
+      case MENU_ARTIST_LIST: headerText = "Artists"; break;
+      case MENU_ALBUM_LIST: headerText = "Albums"; break;
+      case MENU_SONG_LIST: headerText = "Songs"; break;
+      case MENU_NOW_PLAYING: headerText = "Now Playing"; break;
+    }
+    
+    // Header bar
+    display.fillRect(0, 0, SCREEN_WIDTH, 40, COLOR_ACCENT);
+    display.setTextColor(COLOR_HEADER);
+    drawCenteredText(headerText, 12, 2);
+    
+    // Playback indicator in header
+    if (menu == MENU_NOW_PLAYING) {
+      display.setCursor(10, 12);
+      if (player_state == STATE_PLAYING) {
+        display.setTextColor(COLOR_SELECTED);
+        display.print(">");
+      } else if (player_state == STATE_PAUSED) {
+        display.setTextColor(COLOR_DISABLED);
+        display.print("||");
+      }
+    }
+    
+    display.setTextColor(COLOR_TEXT);
+  }
 
   const int maxDisplay = 5;
+  const int startY = 50;
+  const int itemHeight = 36;
 
   // Render based on menu type
   if (menu == MENU_MAIN || menu == MENU_MUSIC || 
       menu == MENU_SETTINGS || menu == MENU_BLUETOOTH)
   {
-    // Generic menu rendering
     int listSize = currentMenuItems.size();
     int windowStart = calculateWindowStart(idx, lastIndex[0], lastWindowStart[0], listSize, maxDisplay);
     
-    lastWindowStart[0] = windowStart;
-    lastIndex[0] = idx;
+    // Detect if we need full list redraw (window scrolled)
+    bool windowChanged = (windowStart != lastWindowStart[0]) || fullRedraw;
     
-    for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
-    {
-      int y = 32 + i * 18;
-      bool selected = (windowStart + i) == idx;
+    lastWindowStart[0] = windowStart;
+    
+    if (windowChanged) {
+      // Clear menu area only
+      display.fillRect(0, startY - 5, SCREEN_WIDTH, maxDisplay * itemHeight + 10, COLOR_BG);
       
-      const MenuItem& item = currentMenuItems[windowStart + i];
-      
-      // Gray out disabled items
-      if (!item.enabled) {
-        display.setTextColor(100);  // Dimmed
+      // Redraw all visible items
+      for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
+      {
+        int y = startY + i * itemHeight;
+        bool selected = (windowStart + i) == idx;
+        
+        const MenuItem& item = currentMenuItems[windowStart + i];
+        drawMenuItem(item.label.c_str(), y, selected, !item.enabled);
+      }
+    } else {
+      // Only selection changed within same window
+      // Redraw old selected item (unselected)
+      if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
+        int oldPos = lastDisplayedIndex - windowStart;
+        int y = startY + oldPos * itemHeight;
+        
+        // Clear old selection
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        
+        const MenuItem& item = currentMenuItems[lastDisplayedIndex];
+        drawMenuItem(item.label.c_str(), y, false, !item.enabled);
       }
       
-      drawMenuItem(item.label.c_str(), y, selected);
+      // Draw new selected item
+      if (idx >= windowStart && idx < windowStart + maxDisplay) {
+        int newPos = idx - windowStart;
+        int y = startY + newPos * itemHeight;
+        
+        // Clear new selection area
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        
+        const MenuItem& item = currentMenuItems[idx];
+        drawMenuItem(item.label.c_str(), y, true, !item.enabled);
+      }
+    }
+    
+    lastIndex[0] = idx;
+    lastDisplayedIndex = idx;
+    
+    // Scroll indicator (always redraw on change)
+    if (listSize > maxDisplay) {
+      // Clear indicator area
+      display.fillRect(SCREEN_WIDTH - 50, SCREEN_HEIGHT - 30, 50, 20, COLOR_BG);
       
-      display.setTextColor(SSD1327_WHITE);
+      display.setTextSize(1);
+      display.setTextColor(COLOR_TEXT);
+      display.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
+      display.printf("%d/%d", idx + 1, listSize);
     }
   }
   else if (menu == MENU_ARTIST_LIST && !artists.empty())
@@ -259,14 +367,44 @@ void updateDisplay()
     int listSize = artists.size();
     int windowStart = calculateWindowStart(artIdx, lastIndex[1], lastWindowStart[1], listSize, maxDisplay);
     
+    bool windowChanged = (windowStart != lastWindowStart[1]) || fullRedraw;
     lastWindowStart[1] = windowStart;
-    lastIndex[1] = artIdx;
     
-    for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
-    {
-      int y = 32 + i * 18;
-      bool selected = (windowStart + i) == artIdx;
-      drawMenuItem(artists[windowStart + i].c_str(), y, selected);
+    if (windowChanged) {
+      display.fillRect(0, startY - 5, SCREEN_WIDTH, maxDisplay * itemHeight + 10, COLOR_BG);
+      
+      for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
+      {
+        int y = startY + i * itemHeight;
+        bool selected = (windowStart + i) == artIdx;
+        drawMenuItem(artists[windowStart + i].c_str(), y, selected, false);
+      }
+    } else {
+      // Only selection changed
+      if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
+        int oldPos = lastDisplayedIndex - windowStart;
+        int y = startY + oldPos * itemHeight;
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        drawMenuItem(artists[lastDisplayedIndex].c_str(), y, false, false);
+      }
+      
+      if (artIdx >= windowStart && artIdx < windowStart + maxDisplay) {
+        int newPos = artIdx - windowStart;
+        int y = startY + newPos * itemHeight;
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        drawMenuItem(artists[artIdx].c_str(), y, true, false);
+      }
+    }
+    
+    lastIndex[1] = artIdx;
+    lastDisplayedIndex = artIdx;
+    
+    if (listSize > maxDisplay) {
+      display.fillRect(SCREEN_WIDTH - 50, SCREEN_HEIGHT - 30, 50, 20, COLOR_BG);
+      display.setTextSize(1);
+      display.setTextColor(COLOR_TEXT);
+      display.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
+      display.printf("%d/%d", artIdx + 1, listSize);
     }
   }
   else if (menu == MENU_ALBUM_LIST && !albums.empty())
@@ -274,14 +412,53 @@ void updateDisplay()
     int listSize = albums.size();
     int windowStart = calculateWindowStart(albIdx, lastIndex[2], lastWindowStart[2], listSize, maxDisplay);
     
+    bool windowChanged = (windowStart != lastWindowStart[2]) || fullRedraw;
     lastWindowStart[2] = windowStart;
-    lastIndex[2] = albIdx;
     
-    for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
-    {
-      int y = 32 + i * 18;
-      bool selected = (windowStart + i) == albIdx;
-      drawMenuItem(albums[windowStart + i].c_str(), y, selected);
+    if (fullRedraw) {
+      // Show current artist in subheader
+      display.setTextSize(1);
+      display.setTextColor(COLOR_DISABLED);
+      display.setCursor(8, 45);
+      display.print(artist);
+    }
+    
+    int offsetY = 15;
+    
+    if (windowChanged) {
+      display.fillRect(0, startY + offsetY - 5, SCREEN_WIDTH, maxDisplay * itemHeight + 10, COLOR_BG);
+      
+      for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
+      {
+        int y = startY + offsetY + i * itemHeight;
+        bool selected = (windowStart + i) == albIdx;
+        drawMenuItem(albums[windowStart + i].c_str(), y, selected, false);
+      }
+    } else {
+      if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
+        int oldPos = lastDisplayedIndex - windowStart;
+        int y = startY + offsetY + oldPos * itemHeight;
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        drawMenuItem(albums[lastDisplayedIndex].c_str(), y, false, false);
+      }
+      
+      if (albIdx >= windowStart && albIdx < windowStart + maxDisplay) {
+        int newPos = albIdx - windowStart;
+        int y = startY + offsetY + newPos * itemHeight;
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        drawMenuItem(albums[albIdx].c_str(), y, true, false);
+      }
+    }
+    
+    lastIndex[2] = albIdx;
+    lastDisplayedIndex = albIdx;
+    
+    if (listSize > maxDisplay) {
+      display.fillRect(SCREEN_WIDTH - 50, SCREEN_HEIGHT - 30, 50, 20, COLOR_BG);
+      display.setTextSize(1);
+      display.setTextColor(COLOR_TEXT);
+      display.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
+      display.printf("%d/%d", albIdx + 1, listSize);
     }
   }
   else if (menu == MENU_SONG_LIST && !songs.empty())
@@ -289,32 +466,105 @@ void updateDisplay()
     int listSize = songs.size();
     int windowStart = calculateWindowStart(sngIdx, lastIndex[3], lastWindowStart[3], listSize, maxDisplay);
     
+    bool windowChanged = (windowStart != lastWindowStart[3]) || fullRedraw;
     lastWindowStart[3] = windowStart;
-    lastIndex[3] = sngIdx;
     
-    for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
-    {
-      int y = 32 + i * 18;
-      bool selected = (windowStart + i) == sngIdx;
-      drawMenuItem(songs[windowStart + i].title.c_str(), y, selected);
+    if (fullRedraw) {
+      display.setTextSize(1);
+      display.setTextColor(COLOR_DISABLED);
+      display.setCursor(8, 45);
+      display.print(album);
+    }
+    
+    int offsetY = 15;
+    
+    if (windowChanged) {
+      display.fillRect(0, startY + offsetY - 5, SCREEN_WIDTH, maxDisplay * itemHeight + 10, COLOR_BG);
+      
+      for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
+      {
+        int y = startY + offsetY + i * itemHeight;
+        bool selected = (windowStart + i) == sngIdx;
+        drawMenuItem(songs[windowStart + i].title.c_str(), y, selected, false);
+      }
+    } else {
+      if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
+        int oldPos = lastDisplayedIndex - windowStart;
+        int y = startY + offsetY + oldPos * itemHeight;
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        drawMenuItem(songs[lastDisplayedIndex].title.c_str(), y, false, false);
+      }
+      
+      if (sngIdx >= windowStart && sngIdx < windowStart + maxDisplay) {
+        int newPos = sngIdx - windowStart;
+        int y = startY + offsetY + newPos * itemHeight;
+        display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+        drawMenuItem(songs[sngIdx].title.c_str(), y, true, false);
+      }
+    }
+    
+    lastIndex[3] = sngIdx;
+    lastDisplayedIndex = sngIdx;
+    
+    if (listSize > maxDisplay) {
+      display.fillRect(SCREEN_WIDTH - 50, SCREEN_HEIGHT - 30, 50, 20, COLOR_BG);
+      display.setTextSize(1);
+      display.setTextColor(COLOR_TEXT);
+      display.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
+      display.printf("%d/%d", sngIdx + 1, listSize);
     }
   }
   else if (menu == MENU_NOW_PLAYING)
   {
-    int centerY = 40;
-    
-    if (strlen(title) > 0) {
-      drawCenteredText(title, centerY);
-      centerY += 14;
-    }
-    if (strlen(artist) > 0) {
-      drawCenteredText(artist, centerY);
-      centerY += 14;
-    }
-    if (strlen(album) > 0) {
-      drawCenteredText(album, centerY);
+    // Full redraw for now playing (doesn't scroll)
+    if (fullRedraw) {
+      display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
+      
+      int centerY = 80;
+      
+      if (strlen(title) > 0) {
+        display.setTextSize(2);
+        display.setTextColor(COLOR_TEXT);
+        
+        String titleStr = String(title);
+        int charsPerLine = 16;
+        
+        for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
+          String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
+          drawCenteredText(chunk.c_str(), centerY + line * 20, 2);
+          titleStr = titleStr.substring(chunk.length());
+        }
+        
+        centerY += 70;
+      }
+      
+      if (strlen(artist) > 0) {
+        display.setTextSize(1);
+        display.setTextColor(COLOR_DISABLED);
+        drawCenteredText(artist, centerY);
+        centerY += 16;
+      }
+      
+      if (strlen(album) > 0) {
+        display.setTextSize(1);
+        display.setTextColor(COLOR_DISABLED);
+        drawCenteredText(album, centerY);
+      }
+      
+      display.setTextSize(1);
+      display.setTextColor(COLOR_TEXT);
+      display.setCursor(10, SCREEN_HEIGHT - 30);
+      display.print("Press: Play/Pause");
+      display.setCursor(10, SCREEN_HEIGHT - 15);
+      display.print("Turn: Next/Prev");
     }
   }
-
-  display.display();
+  
+  // Footer with BT status (only on full redraw)
+  if (fullRedraw) {
+    display.fillRect(0, SCREEN_HEIGHT - 25, SCREEN_WIDTH, 25, COLOR_ACCENT);
+    display.setTextColor(COLOR_HEADER);
+    display.setTextSize(1);
+    drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 14);
+  }
 }

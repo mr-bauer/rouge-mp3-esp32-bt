@@ -12,7 +12,7 @@
 #include "Spinner.h"
 #include "State.h"
 
-// Watchdog timeout (10 seconds)
+// Watchdog timeout (30 seconds)
 #define WDT_TIMEOUT 30
 
 // SD chip select pin
@@ -45,15 +45,19 @@ void setup()
 
     // Show loading animation
     startLoadingAnimation();
+    
+    // Give spinner time to start
+    delay(500);
 
     // Initialize SD card
     if (!sd.begin(cs, SD_SCK_MHZ(25)))
     {
         Serial.println("❌ SD initialization failed!");
-        animationRunning = false;
-        display.clearDisplay();
-        drawCenteredText("SD Card Error", 64);
-        display.display();
+        stopLoadingAnimation();
+        delay(100);
+        display.fillScreen(COLOR_BG);
+        display.setTextColor(COLOR_TEXT);
+        drawCenteredText("SD Card Error", SCREEN_HEIGHT / 2);
         return;
     }
     Serial.println("✅ SD initialized");
@@ -63,10 +67,11 @@ void setup()
     if (!loadIndex())
     {
         Serial.println("❌ Index initialization failed!");
-        animationRunning = false;
-        display.clearDisplay();
-        drawCenteredText("Index Error", 64);
-        display.display();
+        stopLoadingAnimation();
+        delay(100);
+        display.fillScreen(COLOR_BG);
+        display.setTextColor(COLOR_TEXT);
+        drawCenteredText("Index Error", SCREEN_HEIGHT / 2);
         return;
     }
     Serial.println("✅ Index initialized");
@@ -75,15 +80,23 @@ void setup()
     // Build artist list
     if (!buildArtistList()) {
         Serial.println("❌ Failed to build artist list!");
-        animationRunning = false;
-        display.clearDisplay();
-        drawCenteredText("No Artists", 64);
-        display.display();
+        stopLoadingAnimation();
+        delay(100);
+        display.fillScreen(COLOR_BG);
+        display.setTextColor(COLOR_TEXT);
+        drawCenteredText("No Artists", SCREEN_HEIGHT / 2);
         return;
     }
 
     // Stop loading animation
     stopLoadingAnimation();
+    
+    // Clear screen
+    delay(200);
+    if (xSemaphoreTake(displayMutex, 100 / portTICK_PERIOD_MS)) {
+        display.fillScreen(COLOR_BG);
+        xSemaphoreGive(displayMutex);
+    }
     
     // Initialize audio system
     initAudio();
@@ -92,14 +105,17 @@ void setup()
     buildMainMenu();
     navigateToMenu(MENU_MAIN);
     displayNeedsUpdate = true;
+    
+    // Give display task time to render
+    delay(200);
 
     Serial.println("✅ Setup complete!");
     Serial.println("==========================================");
     logRamSpace("setup complete");
 
     // Enable watchdog timer
-    esp_task_wdt_init(WDT_TIMEOUT, true);  // Enable panic on timeout
-    esp_task_wdt_add(NULL);  // Add current task to WDT
+    esp_task_wdt_init(WDT_TIMEOUT, true);
+    esp_task_wdt_add(NULL);
 }
 
 void loop()

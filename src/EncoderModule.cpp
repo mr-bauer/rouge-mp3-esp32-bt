@@ -3,8 +3,8 @@
 #include "Display.h"
 #include <RotaryEncoder.h>
 
-#define ENCODER_PIN_A 12
-#define ENCODER_PIN_B 13
+#define ENCODER_PIN_A 26
+#define ENCODER_PIN_B 25
 
 static RotaryEncoder encoder(ENCODER_PIN_A, ENCODER_PIN_B, RotaryEncoder::LatchMode::TWO03);
 static int lastPos = 0;

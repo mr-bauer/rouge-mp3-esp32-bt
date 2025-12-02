@@ -2,7 +2,7 @@
 #include "Navigation.h"
 
 #define BTN_CENTER 4
-#define BTN_LEFT 15
+#define BTN_LEFT 36
 
 volatile bool btnPressed[2] = { false, false };
 unsigned long lastPressTime[2] = { 0, 0 };

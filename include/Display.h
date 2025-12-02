@@ -2,24 +2,36 @@
 #define DISPLAY_H
 
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1327.h>
-#include <Wire.h>
+#include <Adafruit_ST7789.h>
+#include <SPI.h>
 #include "State.h"
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 128
-#define OLED_RESET -1
-#define OLED_SDA 22
-#define OLED_SCL 20
-#define NEOPIXEL_I2C_POWER 2
+// Display dimensions
+#define SCREEN_WIDTH 240
+#define SCREEN_HEIGHT 240
 
-extern Adafruit_SSD1327 display;
+// HSPI pins for display
+#define TFT_CS    15
+#define TFT_RST   33
+#define TFT_DC    27
+#define TFT_MOSI  13
+#define TFT_SCLK  14
+
+// Colors (16-bit RGB565)
+#define COLOR_BG       0x0000  // Black
+#define COLOR_TEXT     0xFFFF  // White
+#define COLOR_SELECTED 0x07E0  // Green
+#define COLOR_DISABLED 0x7BEF  // Gray
+#define COLOR_ACCENT   0x051F  // Dark Blue
+#define COLOR_HEADER   0xFFFF  // White
+
+extern Adafruit_ST7789 display;
 extern volatile bool displayNeedsUpdate;
 extern SemaphoreHandle_t displayMutex;
 
 void initDisplay();
 void drawCenteredText(const char* text, int y, uint8_t textSize = 1);
-void drawMenuItem(const char* text, int y, bool selected = false);
+void drawMenuItem(const char* text, int y, bool selected = false, bool disabled = false);
 void drawUI();
 void updateDisplay();
 
