@@ -8,43 +8,48 @@
 #include "AudioTools/Communication/A2DPStream.h"
 #include "AudioTools/Disk/AudioSourceSDFAT.h"
 #include "AudioTools/AudioCodecs/CodecMP3Helix.h"
+#include "AudioTools/AudioCodecs/CodecAACFDK.h"  // NEW - AAC decoder
 
 #include <SdFat.h>
 #include "esp_a2dp_api.h"
-// #include <esp_task_wdt.h>
 
 const char *startFilePath = "/";
-const char *ext = "mp3";
+const char *ext = "mp3";  // Will be changed dynamically
 const int buffer_size = 128 * 1024;
 
 const char *headphoneName = "JBL TUNE235NC TWS";
 
 BufferRTOS<uint8_t> buffer(0);
 QueueStream<uint8_t> out(buffer);
-MP3DecoderHelix decoder;
+MP3DecoderHelix mp3Decoder;
+AACDecoderFDK aacDecoder;  // NEW - AAC decoder instance
 
 AudioSourceSDFAT<SdFat32, File32> source(startFilePath, ext, 32);
-AudioPlayer player(source, out, decoder);
+AudioPlayer player(source, out, mp3Decoder);  // Will use mp3Decoder by default
 BluetoothA2DPSource a2dp;
 
 // State tracking
 String last_device_name = headphoneName;
 unsigned long last_watchdog_check = 0;
 
-const unsigned long WATCHDOG_INTERVAL = 500;  // ms
+const unsigned long WATCHDOG_INTERVAL = 500;
+
+// Current file type tracking - NEW
+enum FileType {
+    FILE_MP3,
+    FILE_AAC
+};
+FileType currentFileType = FILE_MP3;
 
 // ============================================================================
 // AUDIO DATA CALLBACK
 // ============================================================================
 
 int32_t get_sound_data(uint8_t* data, int32_t bytes) {
-    // CRITICAL: Always return data to keep Bluetooth stack responsive
-    // Return silence when not playing or not connected
     if (!bluetoothConnected || player_state != STATE_PLAYING || data == NULL || bytes <= 0) {
         return 0;
     }
     
-    // Just read directly - no mutex needed for buffer read
     return buffer.readArray(data, bytes);
 }
 
@@ -60,7 +65,6 @@ void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
             Serial.println("DISCONNECTED");
             bluetoothConnected = false;
             
-            // Stop playback and clear buffer on disconnect
             if (player_state != STATE_STOPPED) {
                 Serial.println("[PLAYER] Stopping due to disconnect");
                 player_state = STATE_STOPPED;
@@ -68,7 +72,6 @@ void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
                 delay(10);
                 a2dp.disconnect();
                 delay(500);
-                // Send back to Main Menu
                 currentMenu = MENU_MAIN;
                 buildMainMenu();
                 displayNeedsUpdate = true;
@@ -83,10 +86,6 @@ void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
         case ESP_A2D_CONNECTION_STATE_CONNECTED:
             Serial.println("CONNECTED");
             bluetoothConnected = true;
-            
-            // Save device name for reconnection
-            // Note: get_peer_name() may not exist in all versions
-            // We'll use the name we connected to instead
             last_device_name = headphoneName;
             Serial.printf("[BT] Connected to: %s\n", last_device_name.c_str());
             break;
@@ -116,6 +115,21 @@ void audio_state_changed(esp_a2d_audio_state_t state, void* ptr) {
 }
 
 // ============================================================================
+// FILE TYPE DETECTION - NEW
+// ============================================================================
+
+FileType detectFileType(const char* path) {
+    String pathStr = String(path);
+    pathStr.toLowerCase();
+    
+    if (pathStr.endsWith(".m4a") || pathStr.endsWith(".mp4") || pathStr.endsWith(".aac")) {
+        return FILE_AAC;
+    }
+    
+    return FILE_MP3;  // Default to MP3
+}
+
+// ============================================================================
 // CONNECTION WATCHDOG
 // ============================================================================
 
@@ -125,7 +139,6 @@ void checkConnectionWatchdog() {
     }
     last_watchdog_check = millis();
     
-    // Check if actual connection state matches our tracked state
     bool actually_connected = a2dp.is_connected();
     
     if (actually_connected != bluetoothConnected) {
@@ -134,12 +147,12 @@ void checkConnectionWatchdog() {
                      bluetoothConnected ? "CONNECTED" : "DISCONNECTED",
                      actually_connected ? "CONNECTED" : "DISCONNECTED");
         
-        // Force disconnect handling
         if (!actually_connected && bluetoothConnected) {
             connection_state_changed(ESP_A2D_CONNECTION_STATE_DISCONNECTED, nullptr);
         }
     }
 }
+
 // ============================================================================
 // PLAYBACK CONTROL FUNCTIONS
 // ============================================================================
@@ -167,7 +180,6 @@ void pausePlayback() {
     
     player_state = STATE_PAUSED;
     Serial.println("[PLAYER] Paused");
-    // Note: Audio callback continues returning silence
 }
 
 void resumePlayback() {
@@ -210,7 +222,6 @@ void reconnectBluetooth() {
     
     Serial.printf("[BT] Attempting to reconnect to: %s\n", last_device_name.c_str());
     
-    // Method 1: Use reconnect() if available
     if (a2dp.reconnect()) {
         Serial.println("[BT] Reconnect initiated");
     } else {
@@ -226,7 +237,6 @@ void disconnectBluetooth() {
     
     Serial.println("[BT] Disconnecting...");
     
-    // Stop playback first
     if (player_state != STATE_STOPPED) {
         stopPlayback();
     }
@@ -237,20 +247,19 @@ void disconnectBluetooth() {
 void changeBluetoothDevice(const String& new_device_name) {
     Serial.printf("[BT] Changing device to: %s\n", new_device_name.c_str());
     
-    // Disconnect if connected
     if (bluetoothConnected) {
         disconnectBluetooth();
-        delay(1000);  // Wait for clean disconnect
+        delay(1000);
     }
     
-    // Update device name
     last_device_name = new_device_name;
-    
-    // Start connection to new device
     a2dp.start(last_device_name.c_str());
     Serial.println("[BT] Connecting to new device...");
 }
 
+// ============================================================================
+// AUDIO INITIALIZATION
+// ============================================================================
 
 void initAudio()
 {
@@ -258,7 +267,6 @@ void initAudio()
     Serial.printf("Audio buffer allocated: %d KB\n", buffer_size / 1024);
     logRamSpace("audio buffer allocation");
 
-    // Configure audio logging (reduce verbosity)
     AudioLogger::instance().begin(Serial, AudioLogger::Warning);
 
     source.begin();
@@ -268,13 +276,11 @@ void initAudio()
     player.setAutoNext(false);
     player.setAutoFade(true);
 
-    // Register callbacks BEFORE starting A2DP
     Serial.println("\n[BT] Configuring Bluetooth A2DP Source...");
     a2dp.set_data_callback(get_sound_data);
     a2dp.set_on_connection_state_changed(connection_state_changed);
     a2dp.set_on_audio_state_changed(audio_state_changed);    
 
-    // Disable auto-reconnect
     a2dp.set_auto_reconnect(false);
     Serial.println("[BT] Auto-reconnect: DISABLED");
     
@@ -288,10 +294,7 @@ void initAudio()
 
 void audioLoop()
 {
-    // Feed buffer when playing
     if (player_state == STATE_PLAYING && bluetoothConnected) {
-        // Read from file and decode
-        // Process audio
         size_t copied = 0;
         
         try {
@@ -308,6 +311,10 @@ void audioLoop()
         }
     }
 }
+
+// ============================================================================
+// PLAY CURRENT SONG - WITH AAC SUPPORT
+// ============================================================================
 
 void playCurrentSong(bool updateDisplay)
 {
@@ -339,6 +346,29 @@ void playCurrentSong(bool updateDisplay)
     Serial.printf("▶️ Playing: %s\n", song.title.c_str());
     Serial.printf("   Path: %s\n", song.path.c_str());
 
+    // Detect file type - NEW
+    FileType newFileType = detectFileType(song.path.c_str());
+    
+    if (newFileType != currentFileType) {
+        Serial.println("[DECODER] Switching decoder...");
+        
+        // Stop current playback
+        if (player.isActive()) {
+            player.stop();
+        }
+        
+        // Switch decoder
+        if (newFileType == FILE_AAC) {
+            Serial.println("[DECODER] Using AAC decoder");
+            player.setDecoder(aacDecoder);
+        } else {
+            Serial.println("[DECODER] Using MP3 decoder");
+            player.setDecoder(mp3Decoder);
+        }
+        
+        currentFileType = newFileType;
+    }
+
     if (player.isActive()) {
         player.stop();
     }
@@ -355,6 +385,7 @@ void playCurrentSong(bool updateDisplay)
     player_state = STATE_PLAYING;
     
     Serial.println("✅ Playback started");
+    Serial.printf("   Format: %s\n", currentFileType == FILE_AAC ? "AAC" : "MP3");
     
     if (currentMenu == MENU_MAIN) {
         buildMainMenu();

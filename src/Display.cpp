@@ -173,10 +173,10 @@ void drawUI()
   drawCenteredText("ROUGE MP3 PLAYER", 12, 2);
   
   // Footer with BT status
-  display.fillRect(0, SCREEN_HEIGHT - 30, SCREEN_WIDTH, 30, COLOR_ACCENT);
-  display.setTextColor(COLOR_HEADER);
-  display.setTextSize(1);
-  drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 18);
+  // display.fillRect(0, SCREEN_HEIGHT - 30, SCREEN_WIDTH, 30, COLOR_ACCENT);
+  // display.setTextColor(COLOR_HEADER);
+  // display.setTextSize(1);
+  // drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 18);
   
   display.setTextColor(COLOR_TEXT);
 }
@@ -520,39 +520,75 @@ void updateDisplay()
   }
   else if (menu == MENU_NOW_PLAYING)
   {
-    // NOW PLAYING always needs full content redraw when song changes
-    // Clear content area (but not header/footer unless fullRedraw)
-    display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
-    
-    int centerY = 80;
-    
-    if (strlen(title) > 0) {
+    // Check if showing volume control - NEW
+    if (volumeControlActive) {
+      // VOLUME CONTROL MODE
+      display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
+      
+      int centerY = 90;
+      
+      // "Volume" label
       display.setTextSize(2);
       display.setTextColor(COLOR_TEXT);
+      drawCenteredText("Volume", centerY);
+      centerY += 30;
       
-      String titleStr = String(title);
-      int charsPerLine = 16;
+      // Volume percentage
+      char volText[16];
+      snprintf(volText, sizeof(volText), "%d%%", currentVolume);
+      display.setTextSize(3);
+      drawCenteredText(volText, centerY);
+      centerY += 40;
       
-      for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
-        String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
-        drawCenteredText(chunk.c_str(), centerY + line * 20, 2);
-        titleStr = titleStr.substring(chunk.length());
+      // Volume bar
+      int barWidth = 200;
+      int barHeight = 20;
+      int barX = (SCREEN_WIDTH - barWidth) / 2;
+      int barY = centerY;
+      
+      // Background (empty bar)
+      display.drawRect(barX, barY, barWidth, barHeight, COLOR_TEXT);
+      
+      // Fill based on volume
+      int fillWidth = (barWidth - 4) * currentVolume / 100;
+      if (fillWidth > 0) {
+        display.fillRect(barX + 2, barY + 2, fillWidth, barHeight - 4, COLOR_ACCENT);
       }
       
-      centerY += 70;
-    }
-    
-    if (strlen(artist) > 0) {
-      display.setTextSize(1);
-      display.setTextColor(COLOR_DISABLED);
-      drawCenteredText(artist, centerY);
-      centerY += 16;
-    }
-    
-    if (strlen(album) > 0) {
-      display.setTextSize(1);
-      display.setTextColor(COLOR_DISABLED);
-      drawCenteredText(album, centerY);
+    } else {
+      // NORMAL NOW PLAYING DISPLAY
+      display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
+      
+      int centerY = 80;
+      
+      if (strlen(title) > 0) {
+        display.setTextSize(2);
+        display.setTextColor(COLOR_TEXT);
+        
+        String titleStr = String(title);
+        int charsPerLine = 16;
+        
+        for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
+          String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
+          drawCenteredText(chunk.c_str(), centerY + line * 20, 2);
+          titleStr = titleStr.substring(chunk.length());
+        }
+        
+        centerY += 70;
+      }
+      
+      if (strlen(artist) > 0) {
+        display.setTextSize(1);
+        display.setTextColor(COLOR_DISABLED);
+        drawCenteredText(artist, centerY);
+        centerY += 16;
+      }
+      
+      if (strlen(album) > 0) {
+        display.setTextSize(1);
+        display.setTextColor(COLOR_DISABLED);
+        drawCenteredText(album, centerY);
+      }
     }
     
     // Only redraw controls on fullRedraw
@@ -562,15 +598,15 @@ void updateDisplay()
       display.setCursor(10, SCREEN_HEIGHT - 30);
       display.print("Press: Play/Pause");
       display.setCursor(10, SCREEN_HEIGHT - 15);
-      display.print("Turn: Next/Prev");
+      display.print("Turn: Volume");  // Changed from "Turn: Next/Prev"
     }
   }
   
   // Footer with BT status (only on full redraw)
   if (fullRedraw) {
-    display.fillRect(0, SCREEN_HEIGHT - 25, SCREEN_WIDTH, 25, COLOR_ACCENT);
-    display.setTextColor(COLOR_HEADER);
-    display.setTextSize(1);
-    drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 14);
+    // display.fillRect(0, SCREEN_HEIGHT - 25, SCREEN_WIDTH, 25, COLOR_ACCENT);
+    // display.setTextColor(COLOR_HEADER);
+    // display.setTextSize(1);
+    // drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 14);
   }
 }

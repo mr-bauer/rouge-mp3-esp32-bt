@@ -2,6 +2,7 @@
 #include "State.h"
 #include "Display.h"
 #include "Haptics.h"
+#include "AudioManager.h"
 #include <RotaryEncoder.h>
 
 #define ENCODER_PIN_A 26
@@ -20,6 +21,17 @@ const int ENCODER_JUMP_THRESHOLD = 3;
 
 // Track scroll direction
 int lastScrollDirection = 0;  // -1 = up, 1 = down, 0 = none
+
+// Direction filtering - NEW
+int directionHistory[3] = {0, 0, 0};  // Track last 3 directions
+int historyIndex = 0;
+
+// Volume control tracking - NEW
+int volumeModeTicks = 0;
+
+// Button suppression during scrolling - NEW
+unsigned long lastEncoderMovement = 0;
+#define BUTTON_SUPPRESS_TIME 300  // Suppress buttons for 300ms after scroll
 
 void IRAM_ATTR encoderISR()
 {
@@ -41,6 +53,22 @@ void initEncoder()
   lastValidPos = lastPos;
   
   Serial.println("✅ Encoder initialized");
+}
+
+// Helper function to determine the dominant scroll direction - NEW
+int getDominantDirection() {
+  int sum = directionHistory[0] + directionHistory[1] + directionHistory[2];
+  
+  // If majority is positive, scrolling up
+  if (sum >= 2) return 1;
+  // If majority is negative, scrolling down
+  if (sum <= -2) return -1;
+  // Unclear direction
+  return 0;
+}
+
+bool isEncoderScrolling() {
+  return (millis() - lastEncoderMovement < BUTTON_SUPPRESS_TIME);
 }
 
 void updateEncoder()
@@ -65,19 +93,84 @@ void updateEncoder()
       return;
     }
     lastEncoderUpdate = now;
+    lastEncoderMovement = now;  // Track for button suppression
     
-    // Normalize to single step and track direction
+    // Normalize to single step
     int step = (delta > 0) ? 1 : -1;
-    lastScrollDirection = step;
+    
+    // Update direction history - NEW
+    directionHistory[historyIndex] = step;
+    historyIndex = (historyIndex + 1) % 3;
+    
+    // Get dominant direction from recent history - NEW
+    int dominantDirection = getDominantDirection();
+    
+    // If we have a clear dominant direction, use it to filter out glitches - NEW
+    if (dominantDirection != 0) {
+      // If this step disagrees with dominant direction, it might be a glitch
+      if (step != dominantDirection) {
+        // Check if this is an isolated opposite tick
+        int oppositeCount = 0;
+        for (int i = 0; i < 3; i++) {
+          if (directionHistory[i] == -dominantDirection) {
+            oppositeCount++;
+          }
+        }
+        
+        // If only 1 out of 3 recent ticks is opposite, ignore it as a glitch
+        if (oppositeCount == 1) {
+          Serial.printf("🔧 Filtered direction glitch: step=%d, dominant=%d\n", 
+                       step, dominantDirection);
+          lastPos = newPos;
+          lastValidPos = newPos;
+          return;
+        }
+      }
+      
+      // Use dominant direction for more stable scrolling
+      step = dominantDirection;
+      lastScrollDirection = dominantDirection;
+    } else {
+      lastScrollDirection = step;
+    }
     
     lastPos = newPos;
     lastValidPos = newPos;
     
-    // NEW: Haptic feedback on encoder tick
+    // Haptic feedback on encoder tick
     hapticEncoderTick();
 
     // Take mutex to safely update shared variables
     if (xSemaphoreTake(displayMutex, 10)) {
+      
+      // SPECIAL HANDLING: Now Playing Volume Control - NEW
+      if (currentMenu == MENU_NOW_PLAYING) {
+        volumeModeTicks++;
+        
+        // After 3 ticks, enter volume control mode
+        if (volumeModeTicks >= VOLUME_ACTIVATION_TICKS) {
+          if (!volumeControlActive) {
+            Serial.println("🔊 Entering volume control mode");
+            volumeControlActive = true;
+          }
+          
+          // Adjust volume
+          currentVolume += (step * 2);  // 2% per tick
+          if (currentVolume < 0) currentVolume = 0;
+          if (currentVolume > 100) currentVolume = 100;
+          
+          player.setVolume(currentVolume / 100.0f);  // Convert to 0.0-1.0
+          lastVolumeChange = millis();
+          displayNeedsUpdate = true;
+          
+          xSemaphoreGive(displayMutex);
+          return;
+        }
+      } else {
+        // Reset volume mode tracking when not in Now Playing
+        volumeModeTicks = 0;
+        volumeControlActive = false;
+      }
       
       // Handle based on current menu
       if (currentMenu == MENU_MAIN || currentMenu == MENU_MUSIC || 
@@ -171,6 +264,31 @@ void updateEncoder()
       }
       
       xSemaphoreGive(displayMutex);
+    }
+  }
+  else {
+    // No encoder movement - check for volume control timeout - NEW
+    if (volumeControlActive) {
+      unsigned long now = millis();
+      if (now - lastVolumeChange > VOLUME_TIMEOUT) {
+        Serial.println("🔊 Exiting volume control mode");
+        volumeControlActive = false;
+        volumeModeTicks = 0;
+        displayNeedsUpdate = true;
+      }
+    } else {
+      // Reset tick counter if no movement
+      if (millis() - lastEncoderUpdate > 500) {
+        volumeModeTicks = 0;
+      }
+    }
+    
+    // Reset direction history if stopped scrolling - NEW
+    if (millis() - lastEncoderUpdate > 500) {
+      directionHistory[0] = 0;
+      directionHistory[1] = 0;
+      directionHistory[2] = 0;
+      historyIndex = 0;
     }
   }
 }

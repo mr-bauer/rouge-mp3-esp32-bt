@@ -14,6 +14,7 @@ import os
 import sqlite3
 from pathlib import Path
 from mutagen.mp3 import MP3
+from mutagen.mp4 import MP4  # NEW - for M4A support
 from mutagen.easyid3 import EasyID3
 import sys
 import argparse
@@ -97,44 +98,86 @@ def get_or_create_album(cursor, artist_id, name, year=None):
     return cursor.lastrowid
 
 def extract_metadata(file_path):
-    """Extract metadata from MP3 file"""
+    """Extract metadata from audio file"""
     try:
-        audio = MP3(file_path, ID3=EasyID3)
+        ext = file_path.lower()
         
-        # Get basic info
-        title = audio.get('title', [os.path.basename(file_path)])[0]
-        artist = audio.get('artist', ['Unknown Artist'])[0]
-        album = audio.get('album', ['Unknown Album'])[0]
-        
-        # Track number
-        track = audio.get('tracknumber', ['0'])[0]
-        try:
-            # Handle formats like "3/12" or just "3"
-            track_num = int(track.split('/')[0])
-        except:
+        # Handle M4A/MP4/AAC files - NEW
+        if ext.endswith(('.m4a', '.mp4', '.aac')):
+            audio = MP4(file_path)
+            
+            # MP4 tags use different keys
+            title = audio.get('\xa9nam', [os.path.basename(file_path)])[0] if '\xa9nam' in audio else os.path.basename(file_path)
+            artist = audio.get('\xa9ART', ['Unknown Artist'])[0] if '\xa9ART' in audio else 'Unknown Artist'
+            album = audio.get('\xa9alb', ['Unknown Album'])[0] if '\xa9alb' in audio else 'Unknown Album'
+            
+            # Track number
             track_num = 0
+            if 'trkn' in audio:
+                track_info = audio['trkn'][0]
+                track_num = track_info[0] if isinstance(track_info, tuple) else 0
+            
+            # Year
+            year = None
+            if '\xa9day' in audio:
+                year_str = audio['\xa9day'][0]
+                try:
+                    year = int(year_str[:4])
+                except:
+                    pass
+            
+            duration = int(audio.info.length)
+            file_size = os.path.getsize(file_path)
+            
+            return {
+                'title': title,
+                'artist': artist,
+                'album': album,
+                'track_number': track_num,
+                'year': year,
+                'duration': duration,
+                'file_size': file_size
+            }
         
-        # Year
-        year = audio.get('date', [None])[0]
-        if year:
+        # Handle MP3 files
+        elif ext.endswith('.mp3'):
+            audio = MP3(file_path, ID3=EasyID3)
+            
+            # Get basic info
+            title = audio.get('title', [os.path.basename(file_path)])[0]
+            artist = audio.get('artist', ['Unknown Artist'])[0]
+            album = audio.get('album', ['Unknown Album'])[0]
+            
+            # Track number
+            track = audio.get('tracknumber', ['0'])[0]
             try:
-                year = int(year[:4])
+                track_num = int(track.split('/')[0])
             except:
-                year = None
-        
-        # Duration and file size
-        duration = int(audio.info.length)
-        file_size = os.path.getsize(file_path)
-        
-        return {
-            'title': title,
-            'artist': artist,
-            'album': album,
-            'track_number': track_num,
-            'year': year,
-            'duration': duration,
-            'file_size': file_size
-        }
+                track_num = 0
+            
+            # Year
+            year = audio.get('date', [None])[0]
+            if year:
+                try:
+                    year = int(year[:4])
+                except:
+                    year = None
+            
+            duration = int(audio.info.length)
+            file_size = os.path.getsize(file_path)
+            
+            return {
+                'title': title,
+                'artist': artist,
+                'album': album,
+                'track_number': track_num,
+                'year': year,
+                'duration': duration,
+                'file_size': file_size
+            }
+        else:
+            return None
+            
     except Exception as e:
         print(f"⚠️  Error reading {file_path}: {e}")
         return None
@@ -155,24 +198,28 @@ def scan_music_folder(music_folder, db_path, verbose=False):
     # Get base path for relative paths
     music_folder = os.path.abspath(music_folder)
     
-    # Scan for MP3 files
-    mp3_files = []
+    # Scan for audio files - UPDATED
+    audio_files = []
     for root, dirs, files in os.walk(music_folder):
         for file in files:
-            if file.lower().endswith('.mp3'):
-                mp3_files.append(os.path.join(root, file))
+            # Skip macOS resource fork files
+            if file.startswith('._'):
+                continue
+            
+            ext = file.lower()
+            if ext.endswith(('.mp3', '.m4a', '.mp4', '.aac')):
+                audio_files.append(os.path.join(root, file))
     
-    total_files = len(mp3_files)
-    print(f"🔍 Found {total_files} MP3 files")
+    total_files = len(audio_files)
+    print(f"🔍 Found {total_files} audio files")
     print()
     
     # Process each file
-    for idx, file_path in enumerate(mp3_files, 1):
-        # Calculate relative path (remove music_folder prefix)
+    for idx, file_path in enumerate(audio_files, 1):
+        # Calculate relative path
         relative_path = os.path.relpath(file_path, music_folder)
         
-        # For ESP32, paths should start with Music/ not just the relative path
-        # Adjust based on your SD card structure
+        # For ESP32, paths should start with Music/
         esp32_path = f"Music/{relative_path}"
         
         if verbose:

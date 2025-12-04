@@ -1,6 +1,7 @@
 #include "Buttons.h"
 #include "Navigation.h"
-#include "Haptics.h"  // NEW
+#include "Haptics.h"
+#include "EncoderModule.h"  // NEW
 
 #define BTN_CENTER 4
 #define BTN_LEFT 36
@@ -31,17 +32,30 @@ void initButtons() {
 }
 
 void pollButtons() {
+  // Check if encoder is actively scrolling - NEW
+  bool scrolling = isEncoderScrolling();
+  
   if (btnPressed[0]) {
     btnPressed[0] = false;
-    Serial.println("🔘 Center button pressed");
-    hapticButtonPress();  // NEW: Haptic feedback
-    handleButtonPress(0);
+    
+    if (scrolling) {
+      Serial.println("🔇 Center button suppressed (scrolling)");
+    } else {
+      Serial.println("🔘 Center button pressed");
+      hapticButtonPress();
+      handleButtonPress(0);
+    }
   }
   
   if (btnPressed[1]) {
     btnPressed[1] = false;
-    Serial.println("🔘 Left button pressed");
-    hapticBack();  // NEW: Stronger feedback for back
-    handleButtonPress(3);
+    
+    if (scrolling) {
+      Serial.println("🔇 Left button suppressed (scrolling)");
+    } else {
+      Serial.println("🔘 Left button pressed");
+      hapticBack();
+      handleButtonPress(3);
+    }
   }
 }

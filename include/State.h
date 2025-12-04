@@ -71,6 +71,13 @@ enum PlayerState { STATE_STOPPED, STATE_PLAYING, STATE_PAUSED };
 extern volatile PlayerState player_state;
 extern bool bluetoothConnected;
 
+// Volume control - NEW
+extern int currentVolume;  // 0-100
+extern bool volumeControlActive;
+extern unsigned long lastVolumeChange;
+#define VOLUME_TIMEOUT 2000  // 2 seconds to return to song display
+#define VOLUME_ACTIVATION_TICKS 3  // Ticks needed to enter volume mode
+
 // Menu functions
 void buildMainMenu();
 void buildMusicMenu();
