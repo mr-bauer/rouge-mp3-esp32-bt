@@ -43,6 +43,10 @@ void initDisplay()
   // Initialize HSPI with custom pins
   hspi.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);  // SCK, MISO (not used), MOSI, CS
   
+  // Set SPI speed to 60 MHz
+  hspi.setFrequency(60000000);
+  Serial.println("⚡ HSPI frequency set to 60 MHz");
+
   // Initialize display
   display.init(SCREEN_WIDTH, SCREEN_HEIGHT);
   

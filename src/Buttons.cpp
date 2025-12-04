@@ -7,7 +7,7 @@
 
 volatile bool btnPressed[2] = { false, false };
 unsigned long lastPressTime[2] = { 0, 0 };
-const unsigned long debounceDelay = 150;
+const unsigned long debounceDelay = 300;
 
 void IRAM_ATTR handleInterrupt(int index) {
   unsigned long now = millis();

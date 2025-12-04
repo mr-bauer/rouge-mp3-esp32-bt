@@ -4,9 +4,10 @@
 #include <SdFat.h>
 #include "State.h"
 
-extern SdFat sd;
+extern SdFat32 sd;
 
-bool loadIndex();
+// New database-based functions
+bool loadDatabase();
 bool buildArtistList();
 bool buildAlbumList(const std::string &artist);
 bool buildSongList(const std::string &artist, const std::string &album);

@@ -12,15 +12,10 @@
 #include "Spinner.h"
 #include "State.h"
 #include "Haptics.h"
+#include "Database.h"
 
-// Watchdog timeout (30 seconds)
 #define WDT_TIMEOUT 30
-
-// SD chip select pin
 const int cs = 32;
-
-// Debug mode - comment out for production
-// #define DEBUG
 
 void setup()
 {
@@ -32,13 +27,6 @@ void setup()
 
     logRamSpace("initial load");
 
-    // Allocate JSON document in PSRAM
-    indexDoc = new SpiRamJsonDocument(500000);
-    if (!indexDoc) {
-        Serial.println("❌ Failed to allocate indexDoc!");
-        return;
-    }
-
     // Initialize hardware modules
     initDisplay();
     initHaptics();
@@ -47,8 +35,6 @@ void setup()
 
     // Show loading animation
     startLoadingAnimation();
-    
-    // Give spinner time to start
     delay(500);
 
     // Initialize SD card
@@ -65,19 +51,22 @@ void setup()
     Serial.println("✅ SD initialized");
     logRamSpace("SD Init");
 
-    // Load music index
-    if (!loadIndex())
+    // Load database (replaces loadIndex())
+    if (!loadDatabase())
     {
-        Serial.println("❌ Index initialization failed!");
+        Serial.println("❌ Database initialization failed!");
         stopLoadingAnimation();
         delay(100);
         display.fillScreen(COLOR_BG);
         display.setTextColor(COLOR_TEXT);
-        drawCenteredText("Index Error", SCREEN_HEIGHT / 2);
+        drawCenteredText("Database Error", SCREEN_HEIGHT / 2);
+        display.setTextSize(1);
+        display.setCursor(10, SCREEN_HEIGHT / 2 + 30);
+        display.println("Run indexer tool");
         return;
     }
-    Serial.println("✅ Index initialized");
-    logRamSpace("Index JSON load");
+    Serial.println("✅ Database initialized");
+    logRamSpace("Database load");
 
     // Build artist list
     if (!buildArtistList()) {
@@ -92,9 +81,8 @@ void setup()
 
     // Stop loading animation
     stopLoadingAnimation();
-    
-    // Clear screen
     delay(200);
+    
     if (xSemaphoreTake(displayMutex, 100 / portTICK_PERIOD_MS)) {
         display.fillScreen(COLOR_BG);
         xSemaphoreGive(displayMutex);
@@ -107,8 +95,6 @@ void setup()
     buildMainMenu();
     navigateToMenu(MENU_MAIN);
     displayNeedsUpdate = true;
-    
-    // Give display task time to render
     delay(200);
 
     Serial.println("✅ Setup complete!");

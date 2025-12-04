@@ -5,9 +5,6 @@
 // Bluetooth status
 std::string btStatus = "BT Ready";
 
-// JSON document
-SpiRamJsonDocument *indexDoc = nullptr;
-
 // Menu state
 MenuType currentMenu = MENU_MAIN;
 std::vector<MenuItem> currentMenuItems;
@@ -31,8 +28,7 @@ volatile int songIndex = 0;
 
 // Playback state
 volatile PlayerState player_state = STATE_STOPPED;
-bool bluetoothConnected = false;  // NEW: Track BT connection state
-
+bool bluetoothConnected = false;
 
 // Menu builders
 void buildMainMenu() {
