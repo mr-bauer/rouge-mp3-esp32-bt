@@ -3,5 +3,6 @@
 
 void initEncoder();
 void updateEncoder();
+bool isEncoderScrolling();
 
 #endif

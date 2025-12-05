@@ -150,6 +150,7 @@ void autoNext()
   {
     songIndex++;
     playCurrentSong(true);
+    displayNeedsUpdate = true;  // NEW
     logRamSpace("auto next - same album");
     return;
   }
@@ -169,6 +170,7 @@ void autoNext()
         if (!songs.empty())
         {
           playCurrentSong(true);
+          displayNeedsUpdate = true;  // NEW
           logRamSpace("auto next - next album");
           return;
         }
@@ -210,6 +212,7 @@ void autoNext()
             if (!songs.empty())
             {
               playCurrentSong(true);
+              displayNeedsUpdate = true;  // NEW
               logRamSpace("auto next - next artist");
               return;
             }

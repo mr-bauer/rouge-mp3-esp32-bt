@@ -3,6 +3,7 @@
 #include "Indexer.h"
 #include "Navigation.h"
 #include "Display.h"
+#include "Preferences.h"  // NEW
 
 #include "AudioTools.h"
 #include "AudioTools/Communication/A2DPStream.h"
@@ -11,7 +12,6 @@
 
 #include <SdFat.h>
 #include "esp_a2dp_api.h"
-// #include <esp_task_wdt.h>
 
 const char *startFilePath = "/";
 const char *ext = "mp3";
@@ -31,7 +31,11 @@ BluetoothA2DPSource a2dp;
 String last_device_name = headphoneName;
 unsigned long last_watchdog_check = 0;
 
-const unsigned long WATCHDOG_INTERVAL = 500;  // ms
+const unsigned long WATCHDOG_INTERVAL = 500; // ms
+
+// Volume saving - NEW
+unsigned long lastVolumeSaveTime = 0;
+int lastSavedVolume = -1;
 
 // ============================================================================
 // AUDIO DATA CALLBACK
@@ -251,30 +255,31 @@ void changeBluetoothDevice(const String& new_device_name) {
     Serial.println("[BT] Connecting to new device...");
 }
 
-
 void initAudio()
 {
     buffer.resize(buffer_size);
     Serial.printf("Audio buffer allocated: %d KB\n", buffer_size / 1024);
     logRamSpace("audio buffer allocation");
 
-    // Configure audio logging (reduce verbosity)
     AudioLogger::instance().begin(Serial, AudioLogger::Warning);
 
     source.begin();
     out.begin(60);
     player.setDelayIfOutputFull(0);
-    player.setVolume(0.4);
+    
+    // Load saved volume - NEW
+    currentVolume = rougePrefs.loadVolume();
+    player.setVolume(currentVolume / 100.0f);
+    Serial.printf("🔊 Volume set to %d%%\n", currentVolume);
+    
     player.setAutoNext(false);
     player.setAutoFade(true);
 
-    // Register callbacks BEFORE starting A2DP
     Serial.println("\n[BT] Configuring Bluetooth A2DP Source...");
     a2dp.set_data_callback(get_sound_data);
     a2dp.set_on_connection_state_changed(connection_state_changed);
     a2dp.set_on_audio_state_changed(audio_state_changed);    
 
-    // Disable auto-reconnect
     a2dp.set_auto_reconnect(false);
     Serial.println("[BT] Auto-reconnect: DISABLED");
     
@@ -290,8 +295,6 @@ void audioLoop()
 {
     // Feed buffer when playing
     if (player_state == STATE_PLAYING && bluetoothConnected) {
-        // Read from file and decode
-        // Process audio
         size_t copied = 0;
         
         try {
@@ -306,6 +309,16 @@ void audioLoop()
             Serial.println("📀 End of file reached (song finished)");    
             autoNext();
         }
+    }
+    
+    // Handle delayed volume save (debouncing) - NEW
+    if (lastVolumeSaveTime > 0 && 
+        currentVolume != lastSavedVolume &&
+        millis() - lastVolumeSaveTime > VOLUME_SAVE_DELAY)
+    {
+        rougePrefs.saveVolume(currentVolume);
+        lastSavedVolume = currentVolume;
+        lastVolumeSaveTime = 0;  // Reset
     }
 }
 

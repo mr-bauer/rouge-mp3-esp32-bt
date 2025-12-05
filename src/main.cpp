@@ -13,6 +13,7 @@
 #include "State.h"
 #include "Haptics.h"
 #include "Database.h"
+#include "Preferences.h"
 
 #define WDT_TIMEOUT 30
 const int cs = 32;
@@ -26,6 +27,11 @@ void setup()
     Serial.println("✅ Watchdog enabled");
 
     logRamSpace("initial load");
+
+    // Initialize preferences FIRST
+    if (!rougePrefs.begin()) {
+        Serial.println("⚠️  Preferences init failed, using defaults");
+    }
 
     // Initialize hardware modules
     initDisplay();

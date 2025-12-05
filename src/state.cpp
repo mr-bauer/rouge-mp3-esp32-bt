@@ -30,6 +30,11 @@ volatile int songIndex = 0;
 volatile PlayerState player_state = STATE_STOPPED;
 bool bluetoothConnected = false;
 
+// Volume control - NEW
+int currentVolume = 50;  // Start at 50%
+bool volumeControlActive = false;
+unsigned long lastVolumeChange = 0;
+
 // Menu builders
 void buildMainMenu() {
   currentMenuItems.clear();
