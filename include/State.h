@@ -48,7 +48,8 @@ extern std::string currentTitle;
 // Song structure
 struct Song
 {
-  std::string title;
+  std::string title;         // Full title (for Now Playing)
+  std::string displayTitle;  // Truncated title (for list display) - NEW
   std::string path;
   int track;
   int duration;

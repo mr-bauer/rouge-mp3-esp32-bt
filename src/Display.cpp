@@ -119,27 +119,9 @@ void drawMenuItem(const char* text, int y, bool selected, bool disabled)
   display.setTextSize(2);
   
   const int padding = 8;
-  const int maxWidth = display.width() - padding * 2;
   const int itemHeight = 36;
   
-  // Truncate long text
-  char shown[64];
-  strncpy(shown, text, 60);
-  shown[60] = '\0';
-  
-  int16_t x1, y1;
-  uint16_t w, h;
-  display.getTextBounds(shown, 0, y, &x1, &y1, &w, &h);
-  
-  if (w > maxWidth - 20) {
-    int maxChars = 20;  // ~20 chars at size 2
-    if (maxChars > 0 && maxChars < 60) {
-      shown[maxChars] = '.';
-      shown[maxChars + 1] = '.';
-      shown[maxChars + 2] = '.';
-      shown[maxChars + 3] = '\0';
-    }
-  }
+  // Text is already truncated from database, just display it
   
   // Draw selection background
   if (selected) {
@@ -152,7 +134,7 @@ void drawMenuItem(const char* text, int y, bool selected, bool disabled)
   }
   
   display.setCursor(padding, y + 4);
-  display.print(shown);
+  display.print(text);
   
   // Draw arrow for enabled items
   if (!disabled && !selected) {
@@ -489,21 +471,24 @@ void updateDisplay()
       {
         int y = startY + offsetY + i * itemHeight;
         bool selected = (windowStart + i) == sngIdx;
-        drawMenuItem(songs[windowStart + i].title.c_str(), y, selected, false);
+        // Use displayTitle instead of title - CHANGED
+        drawMenuItem(songs[windowStart + i].displayTitle.c_str(), y, selected, false);
       }
     } else {
       if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
         int oldPos = lastDisplayedIndex - windowStart;
         int y = startY + offsetY + oldPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        drawMenuItem(songs[lastDisplayedIndex].title.c_str(), y, false, false);
+        // Use displayTitle - CHANGED
+        drawMenuItem(songs[lastDisplayedIndex].displayTitle.c_str(), y, false, false);
       }
       
       if (sngIdx >= windowStart && sngIdx < windowStart + maxDisplay) {
         int newPos = sngIdx - windowStart;
         int y = startY + offsetY + newPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        drawMenuItem(songs[sngIdx].title.c_str(), y, true, false);
+        // Use displayTitle - CHANGED
+        drawMenuItem(songs[sngIdx].displayTitle.c_str(), y, true, false);
       }
     }
     

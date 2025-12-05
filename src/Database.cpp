@@ -12,6 +12,20 @@ MusicDatabase::~MusicDatabase() {
     close();
 }
 
+// Helper function to truncate long strings - UPDATED
+std::string truncateString(const std::string& str, size_t maxLen) {
+    if (str.length() <= maxLen) {
+        return str;
+    }
+    
+    // Leave room for "..."
+    if (maxLen <= 3) {
+        return "...";
+    }
+    
+    return str.substr(0, maxLen - 3) + "...";
+}
+
 bool MusicDatabase::openFromMemory(const char* sdPath) {
     Serial.printf("📂 Loading database from SD to PSRAM: %s\n", sdPath);
     
@@ -124,8 +138,6 @@ bool MusicDatabase::openFromMemory(const char* sdPath) {
 }
 
 bool MusicDatabase::open(const char* path) {
-    // Direct file opening doesn't work with SdFat
-    // Use openFromMemory instead
     return openFromMemory(path);
 }
 
@@ -150,7 +162,8 @@ std::vector<std::string> MusicDatabase::getArtistNames() {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* name = (const char*)sqlite3_column_text(stmt, 0);
             if (name) {
-                result.push_back(name);
+                // Truncate to 20 characters (leaves room for arrow on right)
+                result.push_back(truncateString(name, 17));
             }
         }
     } else {
@@ -171,18 +184,29 @@ std::vector<std::string> MusicDatabase::getAlbumNamesByArtist(const std::string&
     const char* sql = 
         "SELECT albums.name FROM albums "
         "JOIN artists ON albums.artist_id = artists.id "
-        "WHERE artists.name = ? "
+        "WHERE artists.name LIKE ? "
         "ORDER BY albums.year, albums.name COLLATE NOCASE";
     
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, artistName.c_str(), -1, SQLITE_TRANSIENT);
+        // Use wildcard match to handle truncated artist names
+        std::string searchPattern = artistName;
+        // Remove "..." if present for search
+        if (searchPattern.length() >= 3 && 
+            searchPattern.substr(searchPattern.length() - 3) == "...") {
+            searchPattern = searchPattern.substr(0, searchPattern.length() - 3) + "%";
+        } else {
+            searchPattern = artistName;
+        }
+        
+        sqlite3_bind_text(stmt, 1, searchPattern.c_str(), -1, SQLITE_TRANSIENT);
         
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* name = (const char*)sqlite3_column_text(stmt, 0);
             if (name) {
-                result.push_back(name);
+                // Truncate to 20 characters
+                result.push_back(truncateString(name, 17));
             }
         }
     } else {
@@ -205,19 +229,43 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
         "FROM songs "
         "JOIN albums ON songs.album_id = albums.id "
         "JOIN artists ON albums.artist_id = artists.id "
-        "WHERE artists.name = ? AND albums.name = ? "
+        "WHERE artists.name LIKE ? AND albums.name LIKE ? "
         "ORDER BY songs.track_number";
     
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, artistName.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, albumName.c_str(), -1, SQLITE_TRANSIENT);
+        // Handle truncated artist name
+        std::string artistPattern = artistName;
+        if (artistPattern.length() >= 3 && 
+            artistPattern.substr(artistPattern.length() - 3) == "...") {
+            artistPattern = artistPattern.substr(0, artistPattern.length() - 3) + "%";
+        }
+        
+        // Handle truncated album name
+        std::string albumPattern = albumName;
+        if (albumPattern.length() >= 3 && 
+            albumPattern.substr(albumPattern.length() - 3) == "...") {
+            albumPattern = albumPattern.substr(0, albumPattern.length() - 3) + "%";
+        }
+        
+        sqlite3_bind_text(stmt, 1, artistPattern.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, albumPattern.c_str(), -1, SQLITE_TRANSIENT);
         
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             Song song;
-            song.title = (const char*)sqlite3_column_text(stmt, 0);
-            song.path = (const char*)sqlite3_column_text(stmt, 1);
+            const char* title = (const char*)sqlite3_column_text(stmt, 0);
+            const char* path = (const char*)sqlite3_column_text(stmt, 1);
+            
+            if (title) {
+                song.title = title;  // Store FULL title
+                song.displayTitle = truncateString(title, 17);  // Truncated for list
+            }
+            
+            if (path) {
+                song.path = path;
+            }
+            
             song.track = sqlite3_column_int(stmt, 2);
             song.duration = sqlite3_column_int(stmt, 3);
             
@@ -229,7 +277,8 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
     
     sqlite3_finalize(stmt);
     
-    Serial.printf("📊 Loaded %d songs from %s - %s\n", result.size(), artistName.c_str(), albumName.c_str());
+    Serial.printf("📊 Loaded %d songs from %s - %s\n", 
+                  result.size(), artistName.c_str(), albumName.c_str());
     return result;
 }
 
