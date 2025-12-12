@@ -96,6 +96,30 @@ def get_or_create_album(cursor, artist_id, name, year=None):
                    (artist_id, name, year))
     return cursor.lastrowid
 
+def should_skip_file(filename):
+    """Check if file should be skipped (Mac system files, etc.)"""
+    # Skip Mac resource fork files
+    if filename.startswith('._'):
+        return True
+    
+    # Skip Mac metadata files
+    if filename == '.DS_Store':
+        return True
+    
+    # Skip Spotlight indexing files
+    if filename == '.Spotlight-V100':
+        return True
+    
+    # Skip Trash
+    if filename == '.Trashes':
+        return True
+    
+    # Skip hidden files
+    if filename.startswith('.'):
+        return True
+    
+    return False
+
 def extract_metadata(file_path):
     """Extract metadata from MP3 file"""
     try:
@@ -151,19 +175,42 @@ def scan_music_folder(music_folder, db_path, verbose=False):
     song_count = 0
     error_count = 0
     skipped_count = 0
+    mac_files_skipped = 0
+    non_mp3_skipped = 0
     
     # Get base path for relative paths
     music_folder = os.path.abspath(music_folder)
     
-    # Scan for MP3 files
+    # Scan for MP3 files ONLY
     mp3_files = []
     for root, dirs, files in os.walk(music_folder):
+        # Remove hidden directories from search
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        
         for file in files:
+            # Skip Mac system files and hidden files
+            if should_skip_file(file):
+                mac_files_skipped += 1
+                if verbose:
+                    print(f"⏭️  Skipping system file: {file}")
+                continue
+            
+            # STRICT: Only accept .mp3 files
             if file.lower().endswith('.mp3'):
                 mp3_files.append(os.path.join(root, file))
+            else:
+                # Count non-MP3 files for reporting
+                if not file.startswith('.'):
+                    non_mp3_skipped += 1
+                    if verbose:
+                        print(f"⏭️  Skipping non-MP3: {file}")
     
     total_files = len(mp3_files)
     print(f"🔍 Found {total_files} MP3 files")
+    if mac_files_skipped > 0:
+        print(f"   Skipped {mac_files_skipped} Mac system files")
+    if non_mp3_skipped > 0:
+        print(f"   Skipped {non_mp3_skipped} non-MP3 files")
     print()
     
     # Process each file
@@ -171,8 +218,7 @@ def scan_music_folder(music_folder, db_path, verbose=False):
         # Calculate relative path (remove music_folder prefix)
         relative_path = os.path.relpath(file_path, music_folder)
         
-        # For ESP32, paths should start with Music/ not just the relative path
-        # Adjust based on your SD card structure
+        # For ESP32, paths should start with Music/
         esp32_path = f"Music/{relative_path}"
         
         if verbose:
@@ -238,6 +284,10 @@ def scan_music_folder(music_folder, db_path, verbose=False):
         print(f"   Errors:   {error_count}")
     if skipped_count > 0:
         print(f"   Skipped:  {skipped_count} (duplicates)")
+    if mac_files_skipped > 0:
+        print(f"   Mac files skipped: {mac_files_skipped}")
+    if non_mp3_skipped > 0:
+        print(f"   Non-MP3 files skipped: {non_mp3_skipped}")
     print("=" * 50)
     print()
     print(f"📋 Database saved to: {db_path}")

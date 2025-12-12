@@ -47,7 +47,7 @@ bool buildArtistList() {
         return false;
     }
     
-    Serial.printf("✅ Loaded %d artists\n", artists.size());
+    // Serial.printf("✅ Loaded %d artists\n", artists.size());
     return true;
 }
 
@@ -67,7 +67,7 @@ bool buildAlbumList(const std::string &artist) {
         return false;
     }
     
-    Serial.printf("✅ Loaded %d albums for %s\n", albums.size(), artist.c_str());
+    // Serial.printf("✅ Loaded %d albums for %s\n", albums.size(), artist.c_str());
     return true;
 }
 
@@ -87,7 +87,7 @@ bool buildSongList(const std::string &artist, const std::string &album) {
         return false;
     }
     
-    Serial.printf("✅ Loaded %d songs from %s - %s\n", 
-                  songs.size(), artist.c_str(), album.c_str());
+    // Serial.printf("✅ Loaded %d songs from %s - %s\n", 
+    //               songs.size(), artist.c_str(), album.c_str());
     return true;
 }

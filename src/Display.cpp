@@ -111,6 +111,28 @@ void drawCenteredText(const char* text, int y, uint8_t textSize)
   display.print(text);
 }
 
+// Draw playback status icon
+void drawPlaybackIcon(int x, int y, PlayerState state) {
+  const int iconSize = 16;
+  
+  if (state == STATE_PLAYING) {
+    // Draw play triangle (pointing right)
+    display.fillTriangle(
+      x, y,                    // Top left
+      x, y + iconSize,         // Bottom left
+      x + iconSize, y + iconSize/2,  // Right point
+      COLOR_SELECTED
+    );
+  } else if (state == STATE_PAUSED) {
+    // Draw pause bars
+    int barWidth = 5;
+    int gap = 4;
+    display.fillRect(x, y, barWidth, iconSize, COLOR_DISABLED);
+    display.fillRect(x + barWidth + gap, y, barWidth, iconSize, COLOR_DISABLED);
+  }
+  // STATE_STOPPED - draw nothing
+}
+
 void drawMenuItem(const char* text, int y, bool selected, bool disabled)
 {
   if (!text) return;
@@ -145,6 +167,61 @@ void drawMenuItem(const char* text, int y, bool selected, bool disabled)
   display.setTextColor(COLOR_TEXT);
 }
 
+// Draw menu item with playback indicator
+void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disabled, bool isPlaying, PlayerState playState) {
+  if (!text) return;
+  
+  display.setTextWrap(false);
+  display.setTextSize(2);
+  
+  const int padding = 8;
+  const int itemHeight = 36;
+  
+  // Draw selection background
+  if (selected) {
+    display.fillRoundRect(4, y - 4, display.width() - 8, itemHeight, 4, COLOR_SELECTED);
+    display.setTextColor(COLOR_BG);
+  } else if (disabled) {
+    display.setTextColor(COLOR_DISABLED);
+  } else {
+    display.setTextColor(COLOR_TEXT);
+  }
+  
+  display.setCursor(padding, y + 4);
+  display.print(text);
+  
+  // Draw playback indicator OR arrow
+  if (isPlaying) {
+    int iconX = display.width() - 20;
+    int iconY = y + 8;
+    
+    if (playState == STATE_PLAYING) {
+      // Draw small play triangle
+      int iconSize = 12;
+      display.fillTriangle(
+        iconX, iconY,
+        iconX, iconY + iconSize,
+        iconX + iconSize, iconY + iconSize/2,
+        selected ? COLOR_BG : COLOR_SELECTED
+      );
+    } else if (playState == STATE_PAUSED) {
+      // Draw small pause bars
+      int barWidth = 4;
+      int barHeight = 12;
+      int gap = 3;
+      uint16_t color = selected ? COLOR_BG : COLOR_DISABLED;
+      
+      display.fillRect(iconX, iconY, barWidth, barHeight, color);
+      display.fillRect(iconX + barWidth + gap, iconY, barWidth, barHeight, color);
+    }
+  } else if (!disabled && !selected) {
+    display.setCursor(display.width() - 20, y + 4);
+    display.print(">");
+  }
+  
+  display.setTextColor(COLOR_TEXT);
+}
+
 void drawUI()
 {
   display.fillScreen(COLOR_BG);
@@ -153,12 +230,6 @@ void drawUI()
   display.fillRect(0, 0, SCREEN_WIDTH, 40, COLOR_ACCENT);
   display.setTextColor(COLOR_HEADER);
   drawCenteredText("ROUGE MP3 PLAYER", 12, 2);
-  
-  // Footer with BT status
-  // display.fillRect(0, SCREEN_HEIGHT - 30, SCREEN_WIDTH, 30, COLOR_ACCENT);
-  // display.setTextColor(COLOR_HEADER);
-  // display.setTextSize(1);
-  // drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 18);
   
   display.setTextColor(COLOR_TEXT);
 }
@@ -231,10 +302,15 @@ void updateDisplay()
   // Track what was previously displayed
   static MenuType lastMenu = (MenuType)-1;  // Invalid initial state
   static int lastDisplayedIndex = -1;
+  static PlayerState lastPlayerState = STATE_STOPPED;  // NEW - track playback state
   
   // Full redraw if menu changed (will be true on first call)
   bool fullRedraw = (menu != lastMenu);
   lastMenu = menu;
+  
+  // Also redraw header if playback state changed - NEW
+  bool playbackStateChanged = (player_state != lastPlayerState);
+  lastPlayerState = player_state;
   
   if (fullRedraw) {
     display.fillScreen(COLOR_BG);
@@ -244,8 +320,8 @@ void updateDisplay()
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
 
-  // Draw header (only on full redraw)
-  if (fullRedraw) {
+  // Draw header (on full redraw OR playback state change) - UPDATED
+  if (fullRedraw || playbackStateChanged) {
     const char* headerText = "ROUGE MP3";
     switch(menu) {
       case MENU_MAIN: headerText = "Main Menu"; break;
@@ -263,16 +339,9 @@ void updateDisplay()
     display.setTextColor(COLOR_HEADER);
     drawCenteredText(headerText, 12, 2);
     
-    // Playback indicator in header
-    if (menu == MENU_NOW_PLAYING) {
-      display.setCursor(10, 12);
-      if (player_state == STATE_PLAYING) {
-        display.setTextColor(COLOR_SELECTED);
-        display.print(">");
-      } else if (player_state == STATE_PAUSED) {
-        display.setTextColor(COLOR_DISABLED);
-        display.print("||");
-      }
+    // Playback indicator in top-left of header
+    if (player_state == STATE_PLAYING || player_state == STATE_PAUSED) {
+      drawPlaybackIcon(8, 12, player_state);
     }
     
     display.setTextColor(COLOR_TEXT);
@@ -363,7 +432,13 @@ void updateDisplay()
       {
         int y = startY + i * itemHeight;
         bool selected = (windowStart + i) == artIdx;
-        drawMenuItem(artists[windowStart + i].c_str(), y, selected, false);
+        
+        // Check if this is the currently playing artist
+        bool isPlayingArtist = (player_state != STATE_STOPPED && 
+                                !currentArtist.empty() && 
+                                artists[windowStart + i] == currentArtist);
+        
+        drawMenuItemWithPlayback(artists[windowStart + i].c_str(), y, selected, false, isPlayingArtist, player_state);
       }
     } else {
       // Only selection changed
@@ -371,14 +446,24 @@ void updateDisplay()
         int oldPos = lastDisplayedIndex - windowStart;
         int y = startY + oldPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        drawMenuItem(artists[lastDisplayedIndex].c_str(), y, false, false);
+        
+        bool isPlayingArtist = (player_state != STATE_STOPPED && 
+                                !currentArtist.empty() && 
+                                artists[lastDisplayedIndex] == currentArtist);
+        
+        drawMenuItemWithPlayback(artists[lastDisplayedIndex].c_str(), y, false, false, isPlayingArtist, player_state);
       }
       
       if (artIdx >= windowStart && artIdx < windowStart + maxDisplay) {
         int newPos = artIdx - windowStart;
         int y = startY + newPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        drawMenuItem(artists[artIdx].c_str(), y, true, false);
+        
+        bool isPlayingArtist = (player_state != STATE_STOPPED && 
+                                !currentArtist.empty() && 
+                                artists[artIdx] == currentArtist);
+        
+        drawMenuItemWithPlayback(artists[artIdx].c_str(), y, true, false, isPlayingArtist, player_state);
       }
     }
     
@@ -418,21 +503,37 @@ void updateDisplay()
       {
         int y = startY + offsetY + i * itemHeight;
         bool selected = (windowStart + i) == albIdx;
-        drawMenuItem(albums[windowStart + i].c_str(), y, selected, false);
+        
+        // Check if this is the currently playing album
+        bool isPlayingAlbum = (player_state != STATE_STOPPED && 
+                               !currentAlbum.empty() && 
+                               albums[windowStart + i] == currentAlbum);
+        
+        drawMenuItemWithPlayback(albums[windowStart + i].c_str(), y, selected, false, isPlayingAlbum, player_state);
       }
     } else {
       if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
         int oldPos = lastDisplayedIndex - windowStart;
         int y = startY + offsetY + oldPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        drawMenuItem(albums[lastDisplayedIndex].c_str(), y, false, false);
+        
+        bool isPlayingAlbum = (player_state != STATE_STOPPED && 
+                               !currentAlbum.empty() && 
+                               albums[lastDisplayedIndex] == currentAlbum);
+        
+        drawMenuItemWithPlayback(albums[lastDisplayedIndex].c_str(), y, false, false, isPlayingAlbum, player_state);
       }
       
       if (albIdx >= windowStart && albIdx < windowStart + maxDisplay) {
         int newPos = albIdx - windowStart;
         int y = startY + offsetY + newPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        drawMenuItem(albums[albIdx].c_str(), y, true, false);
+        
+        bool isPlayingAlbum = (player_state != STATE_STOPPED && 
+                               !currentAlbum.empty() && 
+                               albums[albIdx] == currentAlbum);
+        
+        drawMenuItemWithPlayback(albums[albIdx].c_str(), y, true, false, isPlayingAlbum, player_state);
       }
     }
     
@@ -471,24 +572,37 @@ void updateDisplay()
       {
         int y = startY + offsetY + i * itemHeight;
         bool selected = (windowStart + i) == sngIdx;
-        // Use displayTitle instead of title - CHANGED
-        drawMenuItem(songs[windowStart + i].displayTitle.c_str(), y, selected, false);
+        
+        // Check if this is the currently playing song
+        bool isPlayingSong = (player_state != STATE_STOPPED && 
+                              !currentTitle.empty() && 
+                              songs[windowStart + i].title == currentTitle);
+        
+        drawMenuItemWithPlayback(songs[windowStart + i].displayTitle.c_str(), y, selected, false, isPlayingSong, player_state);
       }
     } else {
       if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
         int oldPos = lastDisplayedIndex - windowStart;
         int y = startY + offsetY + oldPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        // Use displayTitle - CHANGED
-        drawMenuItem(songs[lastDisplayedIndex].displayTitle.c_str(), y, false, false);
+        
+        bool isPlayingSong = (player_state != STATE_STOPPED && 
+                              !currentTitle.empty() && 
+                              songs[lastDisplayedIndex].title == currentTitle);
+        
+        drawMenuItemWithPlayback(songs[lastDisplayedIndex].displayTitle.c_str(), y, false, false, isPlayingSong, player_state);
       }
       
       if (sngIdx >= windowStart && sngIdx < windowStart + maxDisplay) {
         int newPos = sngIdx - windowStart;
         int y = startY + offsetY + newPos * itemHeight;
         display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
-        // Use displayTitle - CHANGED
-        drawMenuItem(songs[sngIdx].displayTitle.c_str(), y, true, false);
+        
+        bool isPlayingSong = (player_state != STATE_STOPPED && 
+                              !currentTitle.empty() && 
+                              songs[sngIdx].title == currentTitle);
+        
+        drawMenuItemWithPlayback(songs[sngIdx].displayTitle.c_str(), y, true, false, isPlayingSong, player_state);
       }
     }
     
@@ -505,7 +619,7 @@ void updateDisplay()
   }
   else if (menu == MENU_NOW_PLAYING)
   {
-    // Check if showing volume control - NEW
+    // Check if showing volume control
     if (volumeControlActive) {
       // VOLUME CONTROL MODE
       display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
@@ -541,7 +655,7 @@ void updateDisplay()
       }
       
     } else {
-      // NORMAL NOW PLAYING DISPLAY (existing code)
+      // NORMAL NOW PLAYING DISPLAY
       display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
       
       int centerY = 80;
@@ -577,21 +691,13 @@ void updateDisplay()
     }
     
     // Only redraw controls on fullRedraw
-    if (fullRedraw) {
-      display.setTextSize(1);
-      display.setTextColor(COLOR_TEXT);
-      display.setCursor(10, SCREEN_HEIGHT - 30);
-      display.print("Press: Play/Pause");
-      display.setCursor(10, SCREEN_HEIGHT - 15);
-      display.print("Turn: Volume");  // Changed from "Turn: Next/Prev"
-    }
+    // if (fullRedraw) {
+    //   display.setTextSize(1);
+    //   display.setTextColor(COLOR_TEXT);
+    //   display.setCursor(10, SCREEN_HEIGHT - 30);
+    //   display.print("Press: Play/Pause");
+    //   display.setCursor(10, SCREEN_HEIGHT - 15);
+    //   display.print("Turn: Volume");
+    // }
   }
-  
-  // Footer with BT status (only on full redraw)
-  // if (fullRedraw) {
-    // display.fillRect(0, SCREEN_HEIGHT - 25, SCREEN_WIDTH, 25, COLOR_ACCENT);
-    // display.setTextColor(COLOR_HEADER);
-    // display.setTextSize(1);
-    // drawCenteredText(btStatus.c_str(), SCREEN_HEIGHT - 14);
-  // }
 }

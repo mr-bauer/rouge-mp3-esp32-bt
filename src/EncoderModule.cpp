@@ -99,14 +99,14 @@ void updateEncoder()
     lastEncoderUpdate = now;
     lastEncoderMovement = now;
     
-    // Normalize to single step
-    int step = (delta > 0) ? 1 : -1;
+    // Normalize to single step - SWAPPED DIRECTION
+    int step = (delta > 0) ? -1 : 1;  // Changed from: (delta > 0) ? 1 : -1
     
     // Update direction history
     directionHistory[historyIndex] = step;
-    historyIndex = (historyIndex + 1) % 5;  // Changed from 3 to 5
+    historyIndex = (historyIndex + 1) % 5;
     
-    // Track consecutive movements in same direction - NEW
+    // Track consecutive movements in same direction
     if (step == lastScrollDirection) {
       consecutiveSameDirection++;
     } else {
@@ -116,7 +116,7 @@ void updateEncoder()
     // Get dominant direction from recent history
     int dominantDirection = getDominantDirection();
     
-    // More aggressive filtering once we're in a clear scroll pattern - NEW
+    // More aggressive filtering once we're in a clear scroll pattern
     if (dominantDirection != 0) {
       // If we've been scrolling consistently in one direction (3+ steps)
       if (consecutiveSameDirection >= 3) {
@@ -306,7 +306,7 @@ void updateEncoder()
         directionHistory[i] = 0;
       }
       historyIndex = 0;
-      consecutiveSameDirection = 0;  // NEW - reset counter
+      consecutiveSameDirection = 0;
       lastScrollDirection = 0;
     }
   }

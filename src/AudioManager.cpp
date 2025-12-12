@@ -196,9 +196,19 @@ void stopPlayback() {
         return;
     }
     
-    player_state = STATE_STOPPED;
-    player.stop();
+    Serial.println("[PLAYER] Stopping...");
+    
+    // Stop the player
+    if (player.isActive()) {
+        player.stop();
+    }
+    
+    // Clear the buffer
     buffer.reset();
+    
+    // Reset state
+    player_state = STATE_STOPPED;
+    
     Serial.println("[PLAYER] Stopped");
 }
 
@@ -352,10 +362,19 @@ void playCurrentSong(bool updateDisplay)
     Serial.printf("▶️ Playing: %s\n", song.title.c_str());
     Serial.printf("   Path: %s\n", song.path.c_str());
 
+    // CRITICAL: Ensure we're in a clean state before starting
+    // The caller should have called stopPlayback() first for different songs
+    // But double-check here as a safety measure
     if (player.isActive()) {
+        Serial.println("   ⚠️ Player still active, stopping first");
         player.stop();
+        delay(100);
     }
     
+    // Reset buffer to ensure clean start
+    buffer.reset();
+    
+    Serial.println("   Opening file...");
     if (!player.setPath(song.path.c_str())) {
         Serial.printf("❌ Could not open file: %s\n", song.path.c_str());
         currentTitle = "Error: Cannot open";
@@ -364,6 +383,7 @@ void playCurrentSong(bool updateDisplay)
         return;
     }
     
+    Serial.println("   Starting playback...");
     player.play();
     player_state = STATE_PLAYING;
     
