@@ -320,7 +320,6 @@ void updateDisplay()
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
 
-  // Draw header (on full redraw OR playback state change) - UPDATED
   if (fullRedraw || playbackStateChanged) {
     const char* headerText = "ROUGE MP3";
     switch(menu) {
@@ -344,8 +343,37 @@ void updateDisplay()
       drawPlaybackIcon(8, 12, player_state);
     }
     
+    // Battery indicator in top-right of header - NEW
+    display.setTextSize(1);
+    display.setTextColor(COLOR_HEADER);
+    
+    // Show percentage
+    char batteryText[16];
+    if (batteryCharging) {
+      snprintf(batteryText, sizeof(batteryText), "%d%%⚡", batteryPercent);
+    } else {
+      snprintf(batteryText, sizeof(batteryText), "%d%%", batteryPercent);
+    }
+    
+    // Position at top-right
+    int16_t x1, y1;
+    uint16_t w, h;
+    display.getTextBounds(batteryText, 0, 0, &x1, &y1, &w, &h);
+    display.setCursor(SCREEN_WIDTH - w - 8, 12);
+    
+    // Color based on battery level
+    if (batteryPercent <= 10) {
+      display.setTextColor(0xF800);  // Red
+    } else if (batteryPercent <= 20) {
+      display.setTextColor(0xFD20);  // Orange
+    } else {
+      display.setTextColor(COLOR_HEADER);  // White
+    }
+    
+    display.print(batteryText);
+    
     display.setTextColor(COLOR_TEXT);
-  }
+}
 
   const int maxDisplay = 5;
   const int startY = 50;

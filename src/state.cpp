@@ -35,6 +35,12 @@ int currentVolume = 50;  // Start at 50%
 bool volumeControlActive = false;
 unsigned long lastVolumeChange = 0;
 
+// Battery monitoring - NEW
+float batteryVoltage = 0.0f;
+int batteryPercent = 0;
+bool batteryCharging = false;
+unsigned long lastBatteryCheck = 0;
+
 // Menu builders
 void buildMainMenu() {
   currentMenuItems.clear();

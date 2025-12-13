@@ -14,6 +14,7 @@
 #include "Haptics.h"
 #include "Database.h"
 #include "Preferences.h"
+#include "Battery.h"
 
 #define WDT_TIMEOUT 30
 const int cs = 32;
@@ -38,6 +39,7 @@ void setup()
     initHaptics();
     initButtons();
     initEncoder();
+    initBattery();
 
     // Show loading animation
     startLoadingAnimation();
@@ -119,6 +121,9 @@ void loop()
 
     // CORE 1: Audio processing - highest priority
     audioLoop();
+
+    // Battery monitoring
+    updateBattery();
 
     // Encoder updates (lightweight)
     updateEncoder();

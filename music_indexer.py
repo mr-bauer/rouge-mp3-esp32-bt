@@ -17,6 +17,52 @@ from mutagen.mp3 import MP3
 from mutagen.easyid3 import EasyID3
 import sys
 import argparse
+import unicodedata
+import re
+
+def sanitize_text(text):
+    """
+    Clean text to remove special characters and normalize whitespace.
+    Ensures only printable ASCII characters for the MP3 player display.
+    """
+    if not text:
+        return text
+    
+    # Normalize Unicode (decompose accented characters)
+    # NFD = Canonical Decomposition
+    text = unicodedata.normalize('NFD', text)
+    
+    # Remove combining characters (accents)
+    text = ''.join(char for char in text if unicodedata.category(char) != 'Mn')
+    
+    # Replace various problematic characters
+    replacements = {
+        '\u2013': '-',  # en dash
+        '\u2014': '-',  # em dash
+        '\u2018': "'",  # left single quote
+        '\u2019': "'",  # right single quote
+        '\u201C': '"',  # left double quote
+        '\u201D': '"',  # right double quote
+        '\u2026': '...',  # ellipsis
+        '\u00A0': ' ',  # non-breaking space
+        '\t': ' ',      # tab
+        '\n': ' ',      # newline
+        '\r': ' ',      # carriage return
+    }
+    
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Keep only printable ASCII (32-126) and convert others to space
+    cleaned = ''.join(char if 32 <= ord(char) <= 126 else ' ' for char in text)
+    
+    # Normalize whitespace (replace multiple spaces with single space)
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    # Strip leading/trailing whitespace
+    cleaned = cleaned.strip()
+    
+    return cleaned
 
 def create_database(db_path):
     """Create database schema"""
@@ -125,10 +171,15 @@ def extract_metadata(file_path):
     try:
         audio = MP3(file_path, ID3=EasyID3)
         
-        # Get basic info
+        # Get basic info and sanitize
         title = audio.get('title', [os.path.basename(file_path)])[0]
+        title = sanitize_text(title)
+        
         artist = audio.get('artist', ['Unknown Artist'])[0]
+        artist = sanitize_text(artist)
+        
         album = audio.get('album', ['Unknown Album'])[0]
+        album = sanitize_text(album)
         
         # Track number
         track = audio.get('tracknumber', ['0'])[0]
@@ -224,7 +275,7 @@ def scan_music_folder(music_folder, db_path, verbose=False):
         if verbose:
             print(f"[{idx}/{total_files}] Processing: {relative_path}")
         
-        # Extract metadata
+        # Extract metadata (now includes sanitization)
         metadata = extract_metadata(file_path)
         
         if not metadata:

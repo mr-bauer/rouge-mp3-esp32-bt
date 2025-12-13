@@ -80,6 +80,13 @@ extern unsigned long lastVolumeChange;
 #define VOLUME_ACTIVATION_TICKS 3  // Ticks needed to enter volume mode
 #define VOLUME_SAVE_DELAY 3000  // Save 3 seconds after last change
 
+// Battery monitoring - NEW
+extern float batteryVoltage;
+extern int batteryPercent;
+extern bool batteryCharging;
+extern unsigned long lastBatteryCheck;
+#define BATTERY_CHECK_INTERVAL 5000  // Check every 5 seconds
+
 // Menu functions
 void buildMainMenu();
 void buildMusicMenu();
