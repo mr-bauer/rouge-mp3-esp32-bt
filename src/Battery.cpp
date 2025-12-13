@@ -1,8 +1,9 @@
+
 #include "Battery.h"
 #include "State.h"
 
 // Battery voltage divider on Feather V2
-// VBAT --- 100K --- GPIO35 --- 100K --- GND
+// VBAT --- 200K --- GPIO35 --- 200K --- GND
 // So GPIO35 reads VBAT/2
 
 #define BATTERY_PIN 35  // A13 on Feather V2
@@ -17,10 +18,10 @@ void initBattery() {
     pinMode(BATTERY_PIN, INPUT);
     
     // ADC settings for better accuracy
-    analogSetAttenuation(ADC_11db);  // Full range 0-3.3V
+    analogSetAttenuation(ADC_11db);  // Full range 0-3.3V (actually reads 0-3.6V)
     analogReadResolution(12);         // 12-bit resolution (0-4095)
     
-    Serial.println("✅ Battery monitoring initialized");
+    Serial.println("✅ Battery monitoring initialized (200K divider)");
     
     // Take initial reading
     updateBattery();
@@ -30,43 +31,56 @@ float getBatteryVoltage() {
     // Read ADC (0-4095 for 12-bit)
     int rawValue = analogRead(BATTERY_PIN);
     
-    // Convert to voltage (0-3.3V range)
-    float voltage = (rawValue / 4095.0) * 3.3;
+    // ESP32 ADC is not perfectly linear, especially with 11db attenuation
+    // The actual voltage range is closer to 0-3.6V despite 3.3V spec
+    float voltage = (rawValue / 4095.0) * 3.6;
     
-    // Multiply by 2 because of voltage divider
+    // Multiply by 2 because of voltage divider (200K + 200K)
     voltage *= 2.0;
     
-    // Add calibration offset (Feather V2 typically needs +0.1V correction)
-    voltage += 0.1;
+    // ADC reference calibration (adjust this based on actual measurements)
+    // If you have a multimeter, measure your battery and adjust this offset
+    voltage += 0.0;  // Start with no offset, tune if needed
     
     return voltage;
 }
 
 int getBatteryPercent() {
-    // LiPo voltage to percentage conversion
-    // 4.2V = 100%, 3.7V = 50%, 3.0V = 0%
+    // LiPo discharge curve approximation
+    // Based on typical LiPo battery discharge characteristics
     
     if (batteryVoltage >= 4.2) return 100;
-    if (batteryVoltage <= 3.0) return 0;
+    if (batteryVoltage <= 3.2) return 0;  // Don't drain below 3.2V
     
-    // Linear approximation (good enough for most cases)
-    // Better: use a lookup table for real LiPo discharge curve
-    float percent = ((batteryVoltage - 3.0) / (4.2 - 3.0)) * 100.0;
-    
-    return (int)percent;
+    // More accurate curve fitting for LiPo
+    // These breakpoints match real-world LiPo discharge better than linear
+    if (batteryVoltage >= 4.1) {
+        // 4.1V - 4.2V = 90-100%
+        return 90 + (int)((batteryVoltage - 4.1) / 0.1 * 10);
+    } else if (batteryVoltage >= 3.9) {
+        // 3.9V - 4.1V = 70-90%
+        return 70 + (int)((batteryVoltage - 3.9) / 0.2 * 20);
+    } else if (batteryVoltage >= 3.7) {
+        // 3.7V - 3.9V = 40-70%
+        return 40 + (int)((batteryVoltage - 3.7) / 0.2 * 30);
+    } else if (batteryVoltage >= 3.5) {
+        // 3.5V - 3.7V = 20-40%
+        return 20 + (int)((batteryVoltage - 3.5) / 0.2 * 20);
+    } else if (batteryVoltage >= 3.3) {
+        // 3.3V - 3.5V = 5-20%
+        return 5 + (int)((batteryVoltage - 3.3) / 0.2 * 15);
+    } else {
+        // 3.2V - 3.3V = 0-5%
+        return (int)((batteryVoltage - 3.2) / 0.1 * 5);
+    }
 }
 
 bool isBatteryCharging() {
-    // On Feather V2, if voltage is very high (>4.3V) while USB connected,
-    // battery is likely charging. This is a simple heuristic.
-    // A more accurate method would require checking USB voltage separately.
+    // Simple heuristic: if voltage is above full charge, USB is probably connected
+    // and battery is charging or full
+    // Note: This is approximate since we can't directly detect USB voltage
     
-    // If voltage is rising rapidly, probably charging
-    static float lastVoltage = 0.0;
-    bool charging = (batteryVoltage > 4.15 && batteryVoltage > lastVoltage + 0.05);
-    lastVoltage = batteryVoltage;
-    
-    return charging;
+    return (batteryVoltage > 4.25);
 }
 
 void updateBattery() {
