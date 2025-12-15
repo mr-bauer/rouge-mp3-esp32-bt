@@ -72,7 +72,7 @@ enum PlayerState { STATE_STOPPED, STATE_PLAYING, STATE_PAUSED };
 extern volatile PlayerState player_state;
 extern bool bluetoothConnected;
 
-// Volume control - NEW
+// Volume control
 extern int currentVolume;  // 0-100
 extern bool volumeControlActive;
 extern unsigned long lastVolumeChange;
@@ -80,12 +80,21 @@ extern unsigned long lastVolumeChange;
 #define VOLUME_ACTIVATION_TICKS 3  // Ticks needed to enter volume mode
 #define VOLUME_SAVE_DELAY 3000  // Save 3 seconds after last change
 
-// Battery monitoring - NEW
+// Battery monitoring
 extern float batteryVoltage;
 extern int batteryPercent;
 extern bool batteryCharging;
 extern unsigned long lastBatteryCheck;
 #define BATTERY_CHECK_INTERVAL 5000  // Check every 5 seconds
+
+extern int screenBrightness;
+extern bool brightnessControlActive;
+extern unsigned long lastBrightnessChange;
+#define BRIGHTNESS_TIMEOUT 3000
+#define BRIGHTNESS_ACTIVATION_TICKS 2
+
+// Display control - NEW
+extern bool forceDisplayRedraw;
 
 // Menu functions
 void buildMainMenu();

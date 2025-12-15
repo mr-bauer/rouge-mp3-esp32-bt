@@ -34,6 +34,10 @@ void setup()
         Serial.println("⚠️  Preferences init failed, using defaults");
     }
 
+    // Load saved brightness - NEW
+    screenBrightness = rougePrefs.loadBrightness();
+    Serial.printf("💾 Loaded brightness: %d\n", screenBrightness);
+
     // Initialize hardware modules
     initDisplay();
     initHaptics();

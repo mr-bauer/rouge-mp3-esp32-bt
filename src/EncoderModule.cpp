@@ -4,6 +4,7 @@
 #include "Haptics.h"
 #include "AudioManager.h"
 #include <RotaryEncoder.h>
+#include "Preferences.h"
 
 #define ENCODER_PIN_A 26
 #define ENCODER_PIN_B 25
@@ -186,7 +187,25 @@ void updateEncoder()
           xSemaphoreGive(displayMutex);
           return;
         }
-      } else {
+      }
+      
+      // SPECIAL HANDLING: Brightness Control (only when active)
+      else if (brightnessControlActive) {
+        screenBrightness += (step * 5);  // Adjust by 5 per tick
+        if (screenBrightness < 0) screenBrightness = 0;
+        if (screenBrightness > 255) screenBrightness = 255;
+        
+        // Update display immediately (no save yet)
+        ledcWrite(BL_PWM_CHANNEL, screenBrightness);
+        
+        lastBrightnessChange = millis();
+        displayNeedsUpdate = true;
+        
+        xSemaphoreGive(displayMutex);
+        return;
+      }
+      
+      else {
         volumeModeTicks = 0;
         volumeControlActive = false;
       }
@@ -285,7 +304,9 @@ void updateEncoder()
     }
   }
   else {
-    // No encoder movement - check for volume control timeout
+    // No encoder movement - check for timeouts
+    
+    // Volume control timeout
     if (volumeControlActive) {
       unsigned long now = millis();
       if (now - lastVolumeChange > VOLUME_TIMEOUT) {
@@ -294,7 +315,32 @@ void updateEncoder()
         volumeModeTicks = 0;
         displayNeedsUpdate = true;
       }
-    } else {
+    }
+    
+    // Brightness control timeout - UPDATED
+    // Brightness control timeout
+    if (brightnessControlActive) {
+      unsigned long now = millis();
+      if (now - lastBrightnessChange > BRIGHTNESS_TIMEOUT) {
+        Serial.println("🔆 Exiting brightness control mode, saving...");
+        brightnessControlActive = false;
+        
+        // SAVE ONLY ONCE when exiting
+        rougePrefs.saveBrightness(screenBrightness);
+        
+        // Force full redraw - NEW
+        if (xSemaphoreTake(displayMutex, 10)) {
+          display.fillScreen(COLOR_BG);
+          xSemaphoreGive(displayMutex);
+        }
+
+        // Force full redraw - UPDATED
+        forceDisplayRedraw = true;
+        displayNeedsUpdate = true;
+      }
+    }
+    
+    else {
       if (millis() - lastEncoderUpdate > 500) {
         volumeModeTicks = 0;
       }

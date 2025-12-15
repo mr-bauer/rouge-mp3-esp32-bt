@@ -4,6 +4,7 @@
 #include "AudioManager.h"
 #include "State.h"
 #include "Haptics.h"
+#include "Preferences.h"
 
 void handleButtonPress(int buttonIndex)
 {
@@ -68,7 +69,15 @@ void handleCenter()
       }
       
       if (currentMenu == MENU_SETTINGS) {
-        Serial.println("Settings action (not implemented)");
+        // Check if Brightness was selected - NEW
+        if (item.label == "Brightness") {
+          Serial.println("🔆 Entering brightness adjustment");
+          brightnessControlActive = true;
+          lastBrightnessChange = millis();
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }        
         return;
       }
       
@@ -166,6 +175,20 @@ void handleTop()
 {
   // Top button = Menu/Back (like iPod)
   Serial.println("Top button - Menu/Back");
+  
+  // If in brightness mode, save and exit
+  if (brightnessControlActive) {
+    Serial.println("🔆 Exiting brightness control (back button), saving...");
+    brightnessControlActive = false;
+    rougePrefs.saveBrightness(screenBrightness);
+    
+    // Force full redraw - UPDATED
+    forceDisplayRedraw = true;
+    displayNeedsUpdate = true;
+    hapticBack();
+    return;
+  }
+  
   navigateBack();
   displayNeedsUpdate = true;
 }

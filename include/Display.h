@@ -17,6 +17,12 @@
 #define TFT_MOSI  13
 #define TFT_SCLK  14
 
+// Backlight control
+#define TFT_BL    7  // PWM backlight control
+#define BL_PWM_CHANNEL 0
+#define BL_PWM_FREQ 5000
+#define BL_PWM_RESOLUTION 8  // 8-bit (0-255)
+
 // Colors (16-bit RGB565)
 #define COLOR_BG       0x0000  // Black
 #define COLOR_TEXT     0xFFFF  // White
@@ -34,5 +40,6 @@ void drawCenteredText(const char* text, int y, uint8_t textSize = 1);
 void drawMenuItem(const char* text, int y, bool selected = false, bool disabled = false);
 void drawUI();
 void updateDisplay();
+void setScreenBrightness(int brightness);
 
 #endif

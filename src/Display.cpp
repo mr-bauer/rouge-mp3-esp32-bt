@@ -1,4 +1,5 @@
 #include "Display.h"
+#include "Preferences.h"
 #include <cstring>
 
 // Create TFT instance using HSPI
@@ -47,6 +48,14 @@ void initDisplay()
   hspi.setFrequency(60000000);
   Serial.println("⚡ HSPI frequency set to 60 MHz");
 
+  // Initialize backlight PWM - NEW
+  ledcSetup(BL_PWM_CHANNEL, BL_PWM_FREQ, BL_PWM_RESOLUTION);
+  ledcAttachPin(TFT_BL, BL_PWM_CHANNEL);
+  
+  // Start with backlight OFF during init
+  ledcWrite(BL_PWM_CHANNEL, 0);
+  Serial.println("🔆 Backlight PWM initialized on GPIO7 (TX)");  // UPDATED
+
   // Initialize display
   display.init(SCREEN_WIDTH, SCREEN_HEIGHT);
   
@@ -71,6 +80,9 @@ void initDisplay()
   display.setCursor(60, 160);
   display.setTextSize(1);
   display.println("Loading...");
+  
+  // Turn on backlight to saved brightness - NEW
+  setScreenBrightness(screenBrightness);
   
   delay(1000);
   
@@ -283,6 +295,21 @@ int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart, int li
   return newWindowStart;
 }
 
+// Brightness control with hardware PWM - UPDATED
+void setScreenBrightness(int brightness) {
+    // Clamp to valid range
+    if (brightness < 0) brightness = 0;
+    if (brightness > 255) brightness = 255;
+    
+    screenBrightness = brightness;
+    
+    // Set hardware PWM backlight
+    ledcWrite(BL_PWM_CHANNEL, brightness);
+        
+    int percent = (brightness * 100) / 255;
+    Serial.printf("🔆 Brightness set to: %d/255 (%d%%)\n", brightness, percent);
+}
+
 void updateDisplay()
 {
   MenuType menu = currentMenu;
@@ -302,13 +329,18 @@ void updateDisplay()
   // Track what was previously displayed
   static MenuType lastMenu = (MenuType)-1;  // Invalid initial state
   static int lastDisplayedIndex = -1;
-  static PlayerState lastPlayerState = STATE_STOPPED;  // NEW - track playback state
+  static PlayerState lastPlayerState = STATE_STOPPED;
   
-  // Full redraw if menu changed (will be true on first call)
-  bool fullRedraw = (menu != lastMenu);
+  // Full redraw if menu changed OR forced - UPDATED
+  bool fullRedraw = (menu != lastMenu) || forceDisplayRedraw;
   lastMenu = menu;
   
-  // Also redraw header if playback state changed - NEW
+  if (forceDisplayRedraw) {
+    Serial.println("🔄 Force redraw requested");
+    forceDisplayRedraw = false;  // Reset flag
+  }
+  
+  // Also redraw header if playback state changed
   bool playbackStateChanged = (player_state != lastPlayerState);
   lastPlayerState = player_state;
   
@@ -381,7 +413,7 @@ void updateDisplay()
 
   // Render based on menu type
   if (menu == MENU_MAIN || menu == MENU_MUSIC || 
-      menu == MENU_SETTINGS || menu == MENU_BLUETOOTH)
+      menu == MENU_BLUETOOTH)
   {
     int listSize = currentMenuItems.size();
     int windowStart = calculateWindowStart(idx, lastIndex[0], lastWindowStart[0], listSize, maxDisplay);
@@ -443,6 +475,106 @@ void updateDisplay()
       display.setTextColor(COLOR_TEXT);
       display.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
       display.printf("%d/%d", idx + 1, listSize);
+    }
+
+  } else if (menu == MENU_SETTINGS) {
+    // Check if showing brightness control
+    if (brightnessControlActive) {
+        // BRIGHTNESS CONTROL MODE
+        // Clear ENTIRE screen below header - UPDATED
+        display.fillRect(0, 40, SCREEN_WIDTH, SCREEN_HEIGHT - 40, COLOR_BG);
+        
+        int centerY = 90;
+        
+        // "Brightness" label
+        display.setTextSize(2);
+        display.setTextColor(COLOR_TEXT);
+        drawCenteredText("Brightness", centerY);
+        centerY += 30;
+        
+        // Brightness percentage
+        char brightText[16];
+        int brightPercent = (screenBrightness * 100) / 255;
+        snprintf(brightText, sizeof(brightText), "%d%%", brightPercent);
+        display.setTextSize(3);
+        drawCenteredText(brightText, centerY);
+        centerY += 40;
+        
+        // Brightness bar
+        int barWidth = 200;
+        int barHeight = 20;
+        int barX = (SCREEN_WIDTH - barWidth) / 2;
+        int barY = centerY;
+        
+        // Background (empty bar)
+        display.drawRect(barX, barY, barWidth, barHeight, COLOR_TEXT);
+        
+        // Fill based on brightness
+        int fillWidth = (barWidth - 4) * screenBrightness / 255;
+        if (fillWidth > 0) {
+            display.fillRect(barX + 2, barY + 2, fillWidth, barHeight - 4, COLOR_ACCENT);
+        }
+        
+        // Instructions
+        display.setTextSize(1);
+        display.setTextColor(COLOR_TEXT);
+        display.setCursor(10, SCREEN_HEIGHT - 30);
+        display.print("Turn: Adjust");
+        display.setCursor(10, SCREEN_HEIGHT - 15);
+        display.print("Wait/Back: Save");
+        
+    } else {
+        // Normal settings menu
+        int listSize = currentMenuItems.size();
+        int windowStart = calculateWindowStart(idx, lastIndex[0], lastWindowStart[0], listSize, maxDisplay);
+        bool windowChanged = (windowStart != lastWindowStart[0]) || fullRedraw;
+        
+        lastWindowStart[0] = windowStart;
+        
+        if (windowChanged) {
+          display.fillRect(0, startY - 5, SCREEN_WIDTH, maxDisplay * itemHeight + 10, COLOR_BG);
+          
+          for (int i = 0; i < maxDisplay && (windowStart + i) < listSize; i++)
+          {
+            int y = startY + i * itemHeight;
+            bool selected = (windowStart + i) == idx;
+            
+            const MenuItem& item = currentMenuItems[windowStart + i];
+            drawMenuItem(item.label.c_str(), y, selected, !item.enabled);
+          }
+        } else {
+          if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + maxDisplay) {
+            int oldPos = lastDisplayedIndex - windowStart;
+            int y = startY + oldPos * itemHeight;
+            
+            display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+            
+            const MenuItem& item = currentMenuItems[lastDisplayedIndex];
+            drawMenuItem(item.label.c_str(), y, false, !item.enabled);
+          }
+          
+          if (idx >= windowStart && idx < windowStart + maxDisplay) {
+            int newPos = idx - windowStart;
+            int y = startY + newPos * itemHeight;
+            
+            display.fillRect(0, y - 5, SCREEN_WIDTH, itemHeight + 5, COLOR_BG);
+            
+            const MenuItem& item = currentMenuItems[idx];
+            drawMenuItem(item.label.c_str(), y, true, !item.enabled);
+          }
+        }
+        
+        lastIndex[0] = idx;
+        lastDisplayedIndex = idx;
+        
+        if (listSize > maxDisplay) {
+          display.fillRect(SCREEN_WIDTH - 50, SCREEN_HEIGHT - 30, 50, 20, COLOR_BG);
+          
+          display.setTextSize(1);
+          display.setTextColor(COLOR_TEXT);
+          display.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
+          display.printf("%d/%d", idx + 1, listSize);
+        }
     }
   }
   else if (menu == MENU_ARTIST_LIST && !artists.empty())

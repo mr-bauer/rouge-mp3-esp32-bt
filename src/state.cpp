@@ -30,16 +30,24 @@ volatile int songIndex = 0;
 volatile PlayerState player_state = STATE_STOPPED;
 bool bluetoothConnected = false;
 
-// Volume control - NEW
+// Volume control
 int currentVolume = 50;  // Start at 50%
 bool volumeControlActive = false;
 unsigned long lastVolumeChange = 0;
 
-// Battery monitoring - NEW
+// Battery monitoring
 float batteryVoltage = 0.0f;
 int batteryPercent = 0;
 bool batteryCharging = false;
 unsigned long lastBatteryCheck = 0;
+
+// Brightness control
+int screenBrightness = 255;  // Default full brightness
+bool brightnessControlActive = false;
+unsigned long lastBrightnessChange = 0;
+
+// Display control - NEW
+bool forceDisplayRedraw = false;
 
 // Menu builders
 void buildMainMenu() {
@@ -62,6 +70,7 @@ void buildMusicMenu() {
 
 void buildSettingsMenu() {
   currentMenuItems.clear();
+  currentMenuItems.push_back(MenuItem("Brightness", MENU_SETTINGS));  // NEW
   currentMenuItems.push_back(MenuItem("Shuffle: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Repeat: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("About", MENU_SETTINGS));

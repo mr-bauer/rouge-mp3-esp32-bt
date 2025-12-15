@@ -21,6 +21,10 @@ public:
     void saveVolume(int volume);
     int loadVolume();
     
+    // Brightness - NEW
+    void saveBrightness(int brightness);
+    int loadBrightness();
+    
 private:
     nvs_handle_t nvsHandle;
     bool isOpen;

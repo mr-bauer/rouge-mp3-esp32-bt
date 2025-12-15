@@ -1,4 +1,3 @@
-
 #include "Battery.h"
 #include "State.h"
 
@@ -13,6 +12,11 @@
 static float voltageHistory[BATTERY_SAMPLES] = {0};
 static int historyIndex = 0;
 static bool historyFilled = false;
+
+// Charging detection
+static float lastVoltageReading = 0.0f;
+static float voltageChangeRate = 0.0f;
+static unsigned long lastVoltageTime = 0;
 
 void initBattery() {
     pinMode(BATTERY_PIN, INPUT);
@@ -76,11 +80,29 @@ int getBatteryPercent() {
 }
 
 bool isBatteryCharging() {
-    // Simple heuristic: if voltage is above full charge, USB is probably connected
-    // and battery is charging or full
-    // Note: This is approximate since we can't directly detect USB voltage
+    // Improved charging detection with three methods:
+    // 1. If voltage is very high (>4.25V), definitely charging/full with USB
+    // 2. If voltage is rising over time, actively charging
+    // 3. If voltage is stable and high (>4.0V and not dropping), plugged in but full/maintaining
     
-    return (batteryVoltage > 4.25);
+    // Method 1: Very high voltage = definitely USB connected
+    if (batteryVoltage > 4.25) {
+        return true;
+    }
+    
+    // Method 2: Voltage actively rising = charging
+    if (voltageChangeRate > 0.005) {  // Rising by >5mV per check (5 seconds)
+        return true;
+    }
+    
+    // Method 3: Stable at high voltage = plugged in (full or maintaining)
+    // On battery, voltage would be dropping due to consumption
+    // If voltage is stable (not dropping significantly) at >4.0V, USB must be connected
+    if (batteryVoltage > 4.0 && voltageChangeRate > -0.002) {  // Not dropping more than 2mV per check
+        return true;
+    }
+    
+    return false;
 }
 
 void updateBattery() {
@@ -94,6 +116,18 @@ void updateBattery() {
     
     // Get current voltage
     float voltage = getBatteryVoltage();
+    
+    // Calculate voltage change rate for charging detection
+    if (lastVoltageTime > 0) {
+        unsigned long timeDiff = now - lastVoltageTime;
+        float voltageDiff = voltage - lastVoltageReading;
+        
+        // Calculate rate in V/second, then smooth it
+        float instantRate = (voltageDiff * 1000.0) / timeDiff;
+        voltageChangeRate = (voltageChangeRate * 0.7) + (instantRate * 0.3);  // Smooth with 70/30 filter
+    }
+    lastVoltageReading = voltage;
+    lastVoltageTime = now;
     
     // Add to moving average
     voltageHistory[historyIndex] = voltage;
@@ -116,7 +150,8 @@ void updateBattery() {
     batteryCharging = isBatteryCharging();
     
     #ifdef DEBUG
-    Serial.printf("🔋 Battery: %.2fV (%d%%)", batteryVoltage, batteryPercent);
+    Serial.printf("🔋 Battery: %.2fV (%d%%) Rate: %.4fV/s", 
+                  batteryVoltage, batteryPercent, voltageChangeRate);
     if (batteryCharging) {
         Serial.print(" ⚡ CHARGING");
     }

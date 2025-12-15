@@ -97,3 +97,35 @@ int RougePreferences::loadVolume() {
     Serial.printf("💾 Volume loaded: %d%%\n", (int)volume);
     return (int)volume;
 }
+
+// Brightness functions - NEW
+void RougePreferences::saveBrightness(int brightness) {
+    if (!isOpen) return;
+    
+    esp_err_t err = nvs_set_i32(nvsHandle, "brightness", brightness);
+    if (err != ESP_OK) {
+        Serial.printf("⚠️  Failed to save brightness: %d\n", err);
+        return;
+    }
+    
+    nvs_commit(nvsHandle);
+}
+
+int RougePreferences::loadBrightness() {
+    if (!isOpen) return 255;  // Default full brightness
+    
+    int32_t brightness = 255;
+    esp_err_t err = nvs_get_i32(nvsHandle, "brightness", &brightness);
+    
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        saveBrightness(255);
+        return 255;
+    }
+    
+    if (err != ESP_OK) {
+        Serial.printf("⚠️  Failed to load brightness: %d\n", err);
+        return 255;
+    }
+    
+    return (int)brightness;
+}
