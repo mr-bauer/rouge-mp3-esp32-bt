@@ -145,6 +145,17 @@ void drawPlaybackIcon(int x, int y, PlayerState state) {
   // STATE_STOPPED - draw nothing
 }
 
+
+// Draw a small lightning bolt icon - NEW FUNCTION
+void drawLightningIcon(int x, int y, uint16_t color) {
+  // Simple 6x8 lightning bolt
+  display.drawLine(x + 3, y, x + 1, y + 4, color);      // Top diagonal
+  display.drawLine(x + 1, y + 4, x + 3, y + 4, color);  // Middle horizontal
+  display.drawLine(x + 3, y + 4, x + 1, y + 8, color);  // Bottom diagonal
+  display.drawPixel(x + 2, y + 2, color);               // Fill
+  display.drawPixel(x + 2, y + 6, color);               // Fill
+}
+
 void drawMenuItem(const char* text, int y, bool selected, bool disabled)
 {
   if (!text) return;
@@ -330,7 +341,8 @@ void updateDisplay()
   static MenuType lastMenu = (MenuType)-1;  // Invalid initial state
   static int lastDisplayedIndex = -1;
   static PlayerState lastPlayerState = STATE_STOPPED;
-  
+  static unsigned long lastHeaderUpdate = 0;  // NEW - Track header updates
+
   // Full redraw if menu changed OR forced - UPDATED
   bool fullRedraw = (menu != lastMenu) || forceDisplayRedraw;
   lastMenu = menu;
@@ -344,6 +356,10 @@ void updateDisplay()
   bool playbackStateChanged = (player_state != lastPlayerState);
   lastPlayerState = player_state;
   
+  // Periodic header update for battery status - NEW
+  unsigned long now = millis();
+  bool periodicHeaderUpdate = (now - lastHeaderUpdate > 5000);  // Every 5 seconds
+  
   if (fullRedraw) {
     display.fillScreen(COLOR_BG);
   }
@@ -352,7 +368,14 @@ void updateDisplay()
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
 
-  if (fullRedraw || playbackStateChanged) {
+  if (fullRedraw || playbackStateChanged || periodicHeaderUpdate) {
+    if (periodicHeaderUpdate) {
+      lastHeaderUpdate = now;
+      #ifdef DEBUG
+      Serial.println("🔄 Periodic header update (battery status)");
+      #endif
+    }
+    
     const char* headerText = "ROUGE MP3";
     switch(menu) {
       case MENU_MAIN: headerText = "Main Menu"; break;
@@ -381,17 +404,16 @@ void updateDisplay()
     
     // Show percentage
     char batteryText[16];
-    if (batteryCharging) {
-      snprintf(batteryText, sizeof(batteryText), "%d%%⚡", batteryPercent);
-    } else {
-      snprintf(batteryText, sizeof(batteryText), "%d%%", batteryPercent);
-    }
+    snprintf(batteryText, sizeof(batteryText), "%d%%", batteryPercent);
     
     // Position at top-right
     int16_t x1, y1;
     uint16_t w, h;
     display.getTextBounds(batteryText, 0, 0, &x1, &y1, &w, &h);
-    display.setCursor(SCREEN_WIDTH - w - 8, 12);
+    
+    // If charging, make room for icon
+    int iconWidth = batteryCharging ? 10 : 0;
+    display.setCursor(SCREEN_WIDTH - w - iconWidth - 8, 12);
     
     // Color based on battery level
     if (batteryPercent <= 10) {
@@ -404,8 +426,18 @@ void updateDisplay()
     
     display.print(batteryText);
     
+    // Draw lightning icon if charging
+    if (batteryCharging) {
+      drawLightningIcon(SCREEN_WIDTH - iconWidth - 4, 12, COLOR_SELECTED);  // Green lightning
+    }
+    
     display.setTextColor(COLOR_TEXT);
-}
+    
+    // Leave after header is updated if only a periodic update
+    if (!fullRedraw && !playbackStateChanged && periodicHeaderUpdate){
+      return;
+    }
+  }
 
   const int maxDisplay = 5;
   const int startY = 50;

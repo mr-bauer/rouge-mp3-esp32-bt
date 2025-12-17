@@ -1,5 +1,6 @@
 #include "Battery.h"
 #include "State.h"
+#include "Display.h"
 
 // Battery voltage divider on Feather V2
 // VBAT --- 200K --- GPIO35 --- 200K --- GND
@@ -148,6 +149,9 @@ void updateBattery() {
     batteryVoltage = sum / count;
     batteryPercent = getBatteryPercent();
     batteryCharging = isBatteryCharging();
+    
+    // Trigger display update for battery status - NEW
+    displayNeedsUpdate = true;
     
     #ifdef DEBUG
     Serial.printf("🔋 Battery: %.2fV (%d%%) Rate: %.4fV/s", 
