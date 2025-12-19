@@ -31,8 +31,6 @@ BluetoothA2DPSource a2dp;
 String last_device_name = headphoneName;
 unsigned long last_watchdog_check = 0;
 
-const unsigned long WATCHDOG_INTERVAL = 500; // ms
-
 // Volume saving - NEW
 unsigned long lastVolumeSaveTime = 0;
 int lastSavedVolume = -1;
@@ -124,7 +122,7 @@ void audio_state_changed(esp_a2d_audio_state_t state, void* ptr) {
 // ============================================================================
 
 void checkConnectionWatchdog() {
-    if (millis() - last_watchdog_check < WATCHDOG_INTERVAL) {
+    if (millis() - last_watchdog_check < BT_WATCHDOG_INTERVAL) {
         return;
     }
     last_watchdog_check = millis();

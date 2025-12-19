@@ -6,34 +6,26 @@
 #include <RotaryEncoder.h>
 #include "Preferences.h"
 
-#define ENCODER_PIN_A 26
-#define ENCODER_PIN_B 25
-
 static RotaryEncoder encoder(ENCODER_PIN_A, ENCODER_PIN_B, RotaryEncoder::LatchMode::TWO03);
 static int lastPos = 0;
 static int lastValidPos = 0;
 
 // Tuning parameters
 static unsigned long lastEncoderUpdate = 0;
-const unsigned long ENCODER_UPDATE_INTERVAL = 90;
-
-// Anti-jump threshold
-const int ENCODER_JUMP_THRESHOLD = 3;
 
 // Track scroll direction
 int lastScrollDirection = 0;  // -1 = up, 1 = down, 0 = none
 
-// Direction filtering - INCREASED from 3 to 5 samples
-int directionHistory[5] = {0, 0, 0, 0, 0};  // Track last 5 directions
+// Direction filtering - UPDATED to use State.h constant
+int directionHistory[ENCODER_DIRECTION_HISTORY_SIZE] = {0};
 int historyIndex = 0;
-int consecutiveSameDirection = 0;  // NEW - count consecutive movements in same direction
+int consecutiveSameDirection = 0;
 
 // Volume control tracking
 int volumeModeTicks = 0;
 
 // Button suppression during scrolling
 unsigned long lastEncoderMovement = 0;
-#define BUTTON_SUPPRESS_TIME 300
 
 void IRAM_ATTR encoderISR()
 {
@@ -57,23 +49,23 @@ void initEncoder()
   Serial.println("✅ Encoder initialized");
 }
 
-// Helper function to determine the dominant scroll direction - UPDATED
+// Helper function to determine the dominant scroll direction
 int getDominantDirection() {
   int sum = 0;
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < ENCODER_DIRECTION_HISTORY_SIZE; i++) {  // UPDATED
     sum += directionHistory[i];
   }
   
   // If majority is positive, scrolling up
-  if (sum >= 3) return 1;   // At least 3 out of 5 are positive
+  if (sum >= 3) return 1;
   // If majority is negative, scrolling down
-  if (sum <= -3) return -1;  // At least 3 out of 5 are negative
+  if (sum <= -3) return -1;
   // Unclear direction
   return 0;
 }
 
 bool isEncoderScrolling() {
-  return (millis() - lastEncoderMovement < BUTTON_SUPPRESS_TIME);
+  return (millis() - lastEncoderMovement < BUTTON_SUPPRESS_TIME);  // Uses State.h constant
 }
 
 void updateEncoder()
@@ -84,7 +76,7 @@ void updateEncoder()
   {
     int delta = newPos - lastPos;
     
-    // Anti-jump protection
+    // Anti-jump protection - UPDATED to use State.h constant
     if (abs(delta) > ENCODER_JUMP_THRESHOLD) {
       Serial.printf("⚠️ Encoder jump detected: %d steps, ignoring\n", delta);
       encoder.setPosition(lastValidPos);
@@ -92,7 +84,7 @@ void updateEncoder()
       return;
     }
     
-    // Throttle updates
+    // Throttle updates - UPDATED to use State.h constant
     unsigned long now = millis();
     if (now - lastEncoderUpdate < ENCODER_UPDATE_INTERVAL) {
       return;
@@ -100,12 +92,12 @@ void updateEncoder()
     lastEncoderUpdate = now;
     lastEncoderMovement = now;
     
-    // Normalize to single step - SWAPPED DIRECTION
-    int step = (delta > 0) ? -1 : 1;  // Changed from: (delta > 0) ? 1 : -1
+    // Normalize to single step
+    int step = (delta > 0) ? -1 : 1;
     
-    // Update direction history
+    // Update direction history - UPDATED to use State.h constant
     directionHistory[historyIndex] = step;
-    historyIndex = (historyIndex + 1) % 5;
+    historyIndex = (historyIndex + 1) % ENCODER_DIRECTION_HISTORY_SIZE;
     
     // Track consecutive movements in same direction
     if (step == lastScrollDirection) {
@@ -117,10 +109,9 @@ void updateEncoder()
     // Get dominant direction from recent history
     int dominantDirection = getDominantDirection();
     
-    // More aggressive filtering once we're in a clear scroll pattern
+    // More aggressive filtering once we're in a clear scroll pattern - UPDATED constant
     if (dominantDirection != 0) {
-      // If we've been scrolling consistently in one direction (3+ steps)
-      if (consecutiveSameDirection >= 3) {
+      if (consecutiveSameDirection >= ENCODER_DIRECTION_LOCK_THRESHOLD) {
         // Strongly reject opposite direction steps
         if (step != dominantDirection) {
           Serial.printf("🔧 Strong filter: locked to direction %d, ignoring %d\n", 
@@ -133,7 +124,7 @@ void updateEncoder()
         // Normal filtering for initial direction establishment
         if (step != dominantDirection) {
           int oppositeCount = 0;
-          for (int i = 0; i < 5; i++) {
+          for (int i = 0; i < ENCODER_DIRECTION_HISTORY_SIZE; i++) {  // UPDATED
             if (directionHistory[i] == -dominantDirection) {
               oppositeCount++;
             }
@@ -170,7 +161,7 @@ void updateEncoder()
       if (currentMenu == MENU_NOW_PLAYING) {
         volumeModeTicks++;
         
-        if (volumeModeTicks >= VOLUME_ACTIVATION_TICKS) {
+        if (volumeModeTicks >= VOLUME_ACTIVATION_TICKS) {  // Uses State.h constant
           if (!volumeControlActive) {
             Serial.println("🔊 Entering volume control mode");
             volumeControlActive = true;
@@ -191,11 +182,10 @@ void updateEncoder()
       
       // SPECIAL HANDLING: Brightness Control (only when active)
       else if (brightnessControlActive) {
-        screenBrightness += (step * 5);  // Adjust by 5 per tick
+        screenBrightness += (step * 5);
         if (screenBrightness < 0) screenBrightness = 0;
         if (screenBrightness > 255) screenBrightness = 255;
         
-        // Update display immediately (no save yet)
         ledcWrite(BL_PWM_CHANNEL, screenBrightness);
         
         lastBrightnessChange = millis();
@@ -306,7 +296,7 @@ void updateEncoder()
   else {
     // No encoder movement - check for timeouts
     
-    // Volume control timeout
+    // Volume control timeout - UPDATED to use State.h constant
     if (volumeControlActive) {
       unsigned long now = millis();
       if (now - lastVolumeChange > VOLUME_TIMEOUT) {
@@ -317,24 +307,20 @@ void updateEncoder()
       }
     }
     
-    // Brightness control timeout - UPDATED
-    // Brightness control timeout
+    // Brightness control timeout - UPDATED to use State.h constant
     if (brightnessControlActive) {
       unsigned long now = millis();
       if (now - lastBrightnessChange > BRIGHTNESS_TIMEOUT) {
         Serial.println("🔆 Exiting brightness control mode, saving...");
         brightnessControlActive = false;
         
-        // SAVE ONLY ONCE when exiting
         rougePrefs.saveBrightness(screenBrightness);
         
-        // Force full redraw - NEW
         if (xSemaphoreTake(displayMutex, 10)) {
           display.fillScreen(COLOR_BG);
           xSemaphoreGive(displayMutex);
         }
 
-        // Force full redraw - UPDATED
         forceDisplayRedraw = true;
         displayNeedsUpdate = true;
       }
@@ -348,7 +334,7 @@ void updateEncoder()
     
     // Reset direction history if stopped scrolling
     if (millis() - lastEncoderUpdate > 500) {
-      for (int i = 0; i < 5; i++) {
+      for (int i = 0; i < ENCODER_DIRECTION_HISTORY_SIZE; i++) {  // UPDATED
         directionHistory[i] = 0;
       }
       historyIndex = 0;

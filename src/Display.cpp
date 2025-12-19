@@ -632,7 +632,7 @@ void updateDisplay()
   lastPlayerState = player_state;
   
   unsigned long now = millis();
-  bool periodicHeaderUpdate = (now - lastHeaderUpdate > 5000);
+  bool periodicHeaderUpdate = (now - lastHeaderUpdate > DISPLAY_HEADER_UPDATE_INTERVAL);
   
   if (fullRedraw) {
     display.fillScreen(COLOR_BG);

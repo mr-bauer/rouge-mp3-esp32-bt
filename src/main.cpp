@@ -16,7 +16,6 @@
 #include "Preferences.h"
 #include "Battery.h"
 
-#define WDT_TIMEOUT 30
 const int cs = 32;
 
 void setup()
