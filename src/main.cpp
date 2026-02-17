@@ -33,9 +33,11 @@ void setup()
         Serial.println("⚠️  Preferences init failed, using defaults");
     }
 
-    // Load saved brightness - NEW
+    // Load saved preferences
     screenBrightness = rougePrefs.loadBrightness();
     Serial.printf("💾 Loaded brightness: %d\n", screenBrightness);
+    textSizePreference = rougePrefs.loadTextSize();
+    Serial.printf("💾 Loaded text size: %d\n", textSizePreference);
 
     // Initialize hardware modules
     initDisplay();

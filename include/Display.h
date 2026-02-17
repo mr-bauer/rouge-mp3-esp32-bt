@@ -23,10 +23,12 @@
 #define BL_PWM_FREQ 5000
 #define BL_PWM_RESOLUTION 8  // 8-bit (0-255)
 
-// UI Layout Constants - NEW
-#define UI_MAX_VISIBLE_ITEMS 5
+// UI Layout Constants
+// These two scale with textSizePreference (1=small, 2=large)
+inline int uiItemHeight()      { return textSizePreference == 1 ? 14 : 36; }
+inline int uiMaxVisibleItems() { return textSizePreference == 1 ? 13 : 5; }
+// Fixed layout constants (independent of font size)
 #define UI_START_Y 50
-#define UI_ITEM_HEIGHT 36
 #define UI_PADDING 8
 #define UI_HEADER_HEIGHT 40
 #define UI_SCROLL_INDICATOR_WIDTH 50

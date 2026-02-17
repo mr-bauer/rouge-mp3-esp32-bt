@@ -48,6 +48,7 @@ unsigned long lastBrightnessChange = 0;
 
 // Display control - NEW
 bool forceDisplayRedraw = false;
+int textSizePreference = 2;  // 1 (small/6x8px) or 2 (large/12x16px)
 
 // Menu builders
 void buildMainMenu() {
@@ -70,7 +71,10 @@ void buildMusicMenu() {
 
 void buildSettingsMenu() {
   currentMenuItems.clear();
-  currentMenuItems.push_back(MenuItem("Brightness", MENU_SETTINGS));  // NEW
+  currentMenuItems.push_back(MenuItem("Brightness", MENU_SETTINGS));
+  currentMenuItems.push_back(MenuItem(
+    textSizePreference == 1 ? "Text Size: Small" : "Text Size: Large",
+    MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Shuffle: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Repeat: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("About", MENU_SETTINGS));

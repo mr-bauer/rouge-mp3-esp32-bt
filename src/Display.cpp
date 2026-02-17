@@ -156,81 +156,98 @@ void drawLightningIcon(int x, int y, uint16_t color) {
   display.drawPixel(x + 2, y + 6, color);
 }
 
+// Truncate text to fit a menu item row at the current font size.
+// Size 2: 17 chars max (12px/char × 17 = 204px + 8px pad = 212px < 220px before arrow)
+// Size 1: 35 chars max (6px/char × 35 = 210px + 8px pad = 218px < 220px before arrow)
+static std::string truncateForDisplay(const char* text) {
+  if (!text) return "";
+  int maxChars = (textSizePreference == 1) ? 35 : 17;
+  std::string s(text);
+  if ((int)s.length() <= maxChars) return s;
+  return s.substr(0, maxChars - 3) + "...";
+}
+
 void drawMenuItem(const char* text, int y, bool selected, bool disabled)
 {
   if (!text) return;
-  
+
   display.setTextWrap(false);
-  display.setTextSize(2);
-  
+  display.setTextSize(textSizePreference);
+
+  int textOffsetY = (textSizePreference == 1) ? y + 1 : y + 4;
+  std::string displayText = truncateForDisplay(text);
+
   if (selected) {
-    display.fillRoundRect(4, y - 4, display.width() - 8, UI_ITEM_HEIGHT, 4, COLOR_SELECTED);
+    display.fillRoundRect(4, y - 4, display.width() - 8, uiItemHeight(), 4, COLOR_SELECTED);
     display.setTextColor(COLOR_BG);
   } else if (disabled) {
     display.setTextColor(COLOR_DISABLED);
   } else {
     display.setTextColor(COLOR_TEXT);
   }
-  
-  display.setCursor(UI_PADDING, y + 4);
-  display.print(text);
-  
+
+  display.setCursor(UI_PADDING, textOffsetY);
+  display.print(displayText.c_str());
+
   if (!disabled && !selected) {
-    display.setCursor(display.width() - 20, y + 4);
+    display.setCursor(display.width() - 20, textOffsetY);
     display.print(">");
   }
-  
+
   display.setTextColor(COLOR_TEXT);
 }
 
-void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disabled, 
+void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disabled,
                                bool isPlaying, PlayerState playState) {
   if (!text) return;
-  
+
   display.setTextWrap(false);
-  display.setTextSize(2);
-  
+  display.setTextSize(textSizePreference);
+
+  int textOffsetY = (textSizePreference == 1) ? y + 1 : y + 4;
+  std::string displayText = truncateForDisplay(text);
+
   if (selected) {
-    display.fillRoundRect(4, y - 4, display.width() - 8, UI_ITEM_HEIGHT, 4, COLOR_SELECTED);
+    display.fillRoundRect(4, y - 4, display.width() - 8, uiItemHeight(), 4, COLOR_SELECTED);
     display.setTextColor(COLOR_BG);
   } else if (disabled) {
     display.setTextColor(COLOR_DISABLED);
   } else {
     display.setTextColor(COLOR_TEXT);
   }
-  
-  display.setCursor(UI_PADDING, y + 4);
-  display.print(text);
-  
+
+  display.setCursor(UI_PADDING, textOffsetY);
+  display.print(displayText.c_str());
+
   if (isPlaying) {
     int iconX = display.width() - 20;
-    int iconY = y + 8;
-    
+    int iconY = (textSizePreference == 1) ? y + 2 : y + 8;
+
     if (playState == STATE_PLAYING) {
-      int iconSize = 12;
+      int iconSize = (textSizePreference == 1) ? 8 : 12;
       display.fillTriangle(
         iconX, iconY, iconX, iconY + iconSize, iconX + iconSize, iconY + iconSize/2,
         selected ? COLOR_BG : COLOR_SELECTED
       );
     } else if (playState == STATE_PAUSED) {
-      int barWidth = 4;
-      int barHeight = 12;
-      int gap = 3;
+      int barWidth = (textSizePreference == 1) ? 3 : 4;
+      int barHeight = (textSizePreference == 1) ? 8 : 12;
+      int gap = (textSizePreference == 1) ? 2 : 3;
       uint16_t color = selected ? COLOR_BG : COLOR_DISABLED;
-      
+
       display.fillRect(iconX, iconY, barWidth, barHeight, color);
       display.fillRect(iconX + barWidth + gap, iconY, barWidth, barHeight, color);
     }
   } else if (!disabled && !selected) {
-    display.setCursor(display.width() - 20, y + 4);
+    display.setCursor(display.width() - 20, textOffsetY);
     display.print(">");
   }
-  
+
   display.setTextColor(COLOR_TEXT);
 }
 
 void drawScrollIndicator(int currentIndex, int listSize) {
-  if (listSize <= UI_MAX_VISIBLE_ITEMS) return;
+  if (listSize <= uiMaxVisibleItems()) return;
   
   display.fillRect(SCREEN_WIDTH - UI_SCROLL_INDICATOR_WIDTH, 
                    SCREEN_HEIGHT - 30, UI_SCROLL_INDICATOR_WIDTH, 20, COLOR_BG);
@@ -244,7 +261,7 @@ void drawScrollIndicator(int currentIndex, int listSize) {
 void drawControlBar(int centerY, const char* label, int value, int maxValue, 
                    const char* unit) {
   // Label
-  display.setTextSize(2);
+  display.setTextSize(textSizePreference);
   display.setTextColor(COLOR_TEXT);
   drawCenteredText(label, centerY);
   centerY += 30;
@@ -372,42 +389,42 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
 
 void updateMenuList(MenuType menu, int idx, bool fullRedraw) {
   int listSize = currentMenuItems.size();
-  int windowStart = calculateWindowStart(idx, lastIndex[0], lastWindowStart[0], 
-                                         listSize, UI_MAX_VISIBLE_ITEMS);
-  
+  int windowStart = calculateWindowStart(idx, lastIndex[0], lastWindowStart[0],
+                                         listSize, uiMaxVisibleItems());
+
   bool windowChanged = (windowStart != lastWindowStart[0]) || fullRedraw;
   lastWindowStart[0] = windowStart;
-  
+
   if (windowChanged) {
-    display.fillRect(0, UI_START_Y - 5, SCREEN_WIDTH, 
-                    UI_MAX_VISIBLE_ITEMS * UI_ITEM_HEIGHT + 10, COLOR_BG);
-    
-    for (int i = 0; i < UI_MAX_VISIBLE_ITEMS && (windowStart + i) < listSize; i++) {
-      int y = UI_START_Y + i * UI_ITEM_HEIGHT;
+    display.fillRect(0, UI_START_Y - 5, SCREEN_WIDTH,
+                    uiMaxVisibleItems() * uiItemHeight() + 10, COLOR_BG);
+
+    for (int i = 0; i < uiMaxVisibleItems() && (windowStart + i) < listSize; i++) {
+      int y = UI_START_Y + i * uiItemHeight();
       bool selected = (windowStart + i) == idx;
-      
+
       const MenuItem& item = currentMenuItems[windowStart + i];
       drawMenuItem(item.label.c_str(), y, selected, !item.enabled);
     }
   } else {
     // Redraw old selected item
-    if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + UI_MAX_VISIBLE_ITEMS) {
+    if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + uiMaxVisibleItems()) {
       int oldPos = lastDisplayedIndex - windowStart;
-      int y = UI_START_Y + oldPos * UI_ITEM_HEIGHT;
-      
-      display.fillRect(0, y - 5, SCREEN_WIDTH, UI_ITEM_HEIGHT + 5, COLOR_BG);
-      
+      int y = UI_START_Y + oldPos * uiItemHeight();
+
+      display.fillRect(0, y - 5, SCREEN_WIDTH, uiItemHeight() + 5, COLOR_BG);
+
       const MenuItem& item = currentMenuItems[lastDisplayedIndex];
       drawMenuItem(item.label.c_str(), y, false, !item.enabled);
     }
-    
+
     // Draw new selected item
-    if (idx >= windowStart && idx < windowStart + UI_MAX_VISIBLE_ITEMS) {
+    if (idx >= windowStart && idx < windowStart + uiMaxVisibleItems()) {
       int newPos = idx - windowStart;
-      int y = UI_START_Y + newPos * UI_ITEM_HEIGHT;
-      
-      display.fillRect(0, y - 5, SCREEN_WIDTH, UI_ITEM_HEIGHT + 5, COLOR_BG);
-      
+      int y = UI_START_Y + newPos * uiItemHeight();
+
+      display.fillRect(0, y - 5, SCREEN_WIDTH, uiItemHeight() + 5, COLOR_BG);
+
       const MenuItem& item = currentMenuItems[idx];
       drawMenuItem(item.label.c_str(), y, true, !item.enabled);
     }
@@ -445,13 +462,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
   if (listSize == 0) return;
   
   int yOffset = subheader ? UI_SUBHEADER_OFFSET : 0;
-  int windowStart = calculateWindowStart(idx, lastIndex[arrayIndex], 
-                                         lastWindowStart[arrayIndex], 
-                                         listSize, UI_MAX_VISIBLE_ITEMS);
-  
+  int windowStart = calculateWindowStart(idx, lastIndex[arrayIndex],
+                                         lastWindowStart[arrayIndex],
+                                         listSize, uiMaxVisibleItems());
+
   bool windowChanged = (windowStart != lastWindowStart[arrayIndex]) || fullRedraw;
   lastWindowStart[arrayIndex] = windowStart;
-  
+
   // Draw subheader if needed
   if (fullRedraw && subheader) {
     display.setTextSize(1);
@@ -459,13 +476,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
     display.setCursor(8, 45);
     display.print(subheader);
   }
-  
+
   if (windowChanged) {
-    display.fillRect(0, UI_START_Y + yOffset - 5, SCREEN_WIDTH, 
-                    UI_MAX_VISIBLE_ITEMS * UI_ITEM_HEIGHT + 10, COLOR_BG);
-    
-    for (int i = 0; i < UI_MAX_VISIBLE_ITEMS && (windowStart + i) < listSize; i++) {
-      int y = UI_START_Y + yOffset + i * UI_ITEM_HEIGHT;
+    display.fillRect(0, UI_START_Y + yOffset - 5, SCREEN_WIDTH,
+                    uiMaxVisibleItems() * uiItemHeight() + 10, COLOR_BG);
+
+    for (int i = 0; i < uiMaxVisibleItems() && (windowStart + i) < listSize; i++) {
+      int y = UI_START_Y + yOffset + i * uiItemHeight();
       bool selected = (windowStart + i) == idx;
       
       bool isPlaying = false;
@@ -488,10 +505,10 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
     }
   } else {
     // Partial redraw logic (similar to above but for changed selection only)
-    if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + UI_MAX_VISIBLE_ITEMS) {
+    if (lastDisplayedIndex >= windowStart && lastDisplayedIndex < windowStart + uiMaxVisibleItems()) {
       int oldPos = lastDisplayedIndex - windowStart;
-      int y = UI_START_Y + yOffset + oldPos * UI_ITEM_HEIGHT;
-      display.fillRect(0, y - 5, SCREEN_WIDTH, UI_ITEM_HEIGHT + 5, COLOR_BG);
+      int y = UI_START_Y + yOffset + oldPos * uiItemHeight();
+      display.fillRect(0, y - 5, SCREEN_WIDTH, uiItemHeight() + 5, COLOR_BG);
       
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
@@ -512,10 +529,10 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
       }
     }
     
-    if (idx >= windowStart && idx < windowStart + UI_MAX_VISIBLE_ITEMS) {
+    if (idx >= windowStart && idx < windowStart + uiMaxVisibleItems()) {
       int newPos = idx - windowStart;
-      int y = UI_START_Y + yOffset + newPos * UI_ITEM_HEIGHT;
-      display.fillRect(0, y - 5, SCREEN_WIDTH, UI_ITEM_HEIGHT + 5, COLOR_BG);
+      int y = UI_START_Y + yOffset + newPos * uiItemHeight();
+      display.fillRect(0, y - 5, SCREEN_WIDTH, uiItemHeight() + 5, COLOR_BG);
       
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
@@ -578,19 +595,20 @@ void updateNowPlayingScreen() {
   int centerY = 80;
   
   if (strlen(title) > 0) {
-    display.setTextSize(2);
+    display.setTextSize(textSizePreference);
     display.setTextColor(COLOR_TEXT);
-    
+
     String titleStr = String(title);
-    int charsPerLine = 16;
-    
+    int charsPerLine = (textSizePreference == 1) ? 33 : 16;
+    int lineSpacing  = (textSizePreference == 1) ? 10 : 20;
+
     for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
       String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
-      drawCenteredText(chunk.c_str(), centerY + line * 20, 2);
+      drawCenteredText(chunk.c_str(), centerY + line * lineSpacing, textSizePreference);
       titleStr = titleStr.substring(chunk.length());
     }
-    
-    centerY += 70;
+
+    centerY += (textSizePreference == 1) ? 40 : 70;
   }
   
   if (strlen(artist) > 0) {
@@ -638,10 +656,10 @@ void updateDisplay()
     display.fillScreen(COLOR_BG);
   }
   
-  display.setTextSize(2);
+  display.setTextSize(textSizePreference);
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
-  
+
   // Update header
   updateHeader(fullRedraw, playbackStateChanged, periodicHeaderUpdate);
   
