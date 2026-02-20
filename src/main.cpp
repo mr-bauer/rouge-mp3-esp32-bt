@@ -58,7 +58,7 @@ void setup()
         delay(100);
         display.fillScreen(COLOR_BG);
         display.setTextColor(COLOR_TEXT);
-        drawCenteredText("SD Card Error", SCREEN_HEIGHT / 2);
+        drawCenteredText(display, "SD Card Error", SCREEN_HEIGHT / 2);
         return;
     }
     Serial.println("✅ SD initialized");
@@ -72,7 +72,7 @@ void setup()
         delay(100);
         display.fillScreen(COLOR_BG);
         display.setTextColor(COLOR_TEXT);
-        drawCenteredText("Database Error", SCREEN_HEIGHT / 2);
+        drawCenteredText(display, "Database Error", SCREEN_HEIGHT / 2);
         display.setTextSize(1);
         display.setCursor(10, SCREEN_HEIGHT / 2 + 30);
         display.println("Run indexer tool");
@@ -88,7 +88,7 @@ void setup()
         delay(100);
         display.fillScreen(COLOR_BG);
         display.setTextColor(COLOR_TEXT);
-        drawCenteredText("No Artists", SCREEN_HEIGHT / 2);
+        drawCenteredText(display, "No Artists", SCREEN_HEIGHT / 2);
         return;
     }
 

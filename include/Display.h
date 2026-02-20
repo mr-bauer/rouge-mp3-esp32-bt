@@ -1,9 +1,7 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
-#include <SPI.h>
+#include <LovyanGFX.hpp>
 #include "State.h"
 
 // Display dimensions
@@ -22,6 +20,54 @@
 #define BL_PWM_CHANNEL 0
 #define BL_PWM_FREQ 5000
 #define BL_PWM_RESOLUTION 8  // 8-bit (0-255)
+
+// LovyanGFX display driver configuration for ST7789 240x240 on HSPI
+class LGFX : public lgfx::LGFX_Device {
+    lgfx::Panel_ST7789 _panel_instance;
+    lgfx::Bus_SPI      _bus_instance;
+    lgfx::Light_PWM    _light_instance;
+public:
+    LGFX(void) {
+        { auto cfg = _bus_instance.config();
+          cfg.spi_host    = HSPI_HOST;
+          cfg.spi_mode    = 0;
+          cfg.freq_write  = 60000000;
+          cfg.freq_read   = 16000000;
+          cfg.spi_3wire   = false;
+          cfg.use_lock    = true;
+          cfg.dma_channel = 0;  // DMA disabled: its IRAM ISR would overflow iram0_0_seg
+          cfg.pin_sclk    = TFT_SCLK;
+          cfg.pin_mosi    = TFT_MOSI;
+          cfg.pin_miso    = -1;
+          cfg.pin_dc      = TFT_DC;
+          _bus_instance.config(cfg);
+          _panel_instance.setBus(&_bus_instance); }
+        { auto cfg = _panel_instance.config();
+          cfg.pin_cs    = TFT_CS;
+          cfg.pin_rst   = TFT_RST;
+          cfg.pin_busy  = -1;
+          cfg.memory_width  = SCREEN_WIDTH;
+          cfg.memory_height = 320;  // ST7789 has 240x320 internal memory
+          cfg.panel_width   = SCREEN_WIDTH;
+          cfg.panel_height  = SCREEN_HEIGHT;
+          cfg.offset_x = 0; cfg.offset_y = 0; cfg.offset_rotation = 0;
+          cfg.dummy_read_pixel = 8; cfg.dummy_read_bits = 1;
+          cfg.readable   = false;
+          cfg.invert     = true;   // ST7789 requires color inversion
+          cfg.rgb_order  = false;
+          cfg.dlen_16bit = false;
+          cfg.bus_shared = false;
+          _panel_instance.config(cfg); }
+        { auto cfg = _light_instance.config();
+          cfg.pin_bl      = TFT_BL;
+          cfg.invert      = false;
+          cfg.freq        = BL_PWM_FREQ;
+          cfg.pwm_channel = BL_PWM_CHANNEL;
+          _light_instance.config(cfg);
+          _panel_instance.setLight(&_light_instance); }
+        setPanel(&_panel_instance);
+    }
+};
 
 // UI Layout Constants
 // These two scale with textSizePreference (1=small, 2=large)
@@ -42,7 +88,8 @@ inline int uiMaxVisibleItems() { return textSizePreference == 1 ? 13 : 5; }
 #define COLOR_ACCENT   0x051F  // Dark Blue
 #define COLOR_HEADER   0xFFFF  // White
 
-extern Adafruit_ST7789 display;
+extern LGFX display;
+extern lgfx::LGFX_Sprite sprite;  // full-screen off-screen buffer (240x240, PSRAM)
 extern volatile bool displayNeedsUpdate;
 extern SemaphoreHandle_t displayMutex;
 
@@ -62,19 +109,19 @@ void updateBrightnessScreen();
 void updateVolumeScreen();
 
 // Helper drawing functions
-void drawCenteredText(const char* text, int y, uint8_t textSize = 1);
+void drawCenteredText(lgfx::LGFXBase& gfx, const char* text, int y, uint8_t textSize = 1);
 void drawMenuItem(const char* text, int y, bool selected = false, bool disabled = false);
-void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disabled, 
+void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disabled,
                                bool isPlaying, PlayerState playState);
 void drawPlaybackIcon(int x, int y, PlayerState state);
 void drawLightningIcon(int x, int y, uint16_t color);
 void drawScrollIndicator(int currentIndex, int listSize);
-void drawControlBar(int centerY, const char* label, int value, int maxValue, 
+void drawControlBar(int centerY, const char* label, int value, int maxValue,
                    const char* unit);
 
 // Utility functions
 void drawUI();
-int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart, 
+int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart,
                         int listSize, const int maxDisplay);
 
 #endif

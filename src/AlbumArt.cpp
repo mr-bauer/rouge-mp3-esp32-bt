@@ -3,17 +3,17 @@
 #include "Display.h"
 #include <TJpg_Decoder.h>
 
-extern Adafruit_ST7789 display;
+extern lgfx::LGFX_Sprite sprite;
 
 static uint8_t* artBuffer = nullptr;
 static size_t   artSize   = 0;
 
 static const size_t ART_BUFFER_MAX = 300 * 1024;  // 300 KB cap (allows high-res embedded art)
 
-// TJpg_Decoder callback: receives decoded pixel blocks and writes to display
+// TJpg_Decoder callback: receives decoded pixel blocks and writes to sprite
 static bool jpegOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (y >= display.height()) return false;
-    display.drawRGBBitmap(x, y, bitmap, w, h);
+    if (y >= SCREEN_HEIGHT) return false;
+    sprite.pushImage(x, y, w, h, bitmap);
     return true;
 }
 
@@ -171,6 +171,7 @@ void drawAlbumArt(int targetX, int targetY, int maxSize) {
 
     Serial.printf("🎨 Drawing album art: maxSize=%d, bufferSize=%u\n", maxSize, artSize);
 
+    TJpgDec.setSwapBytes(true);  // LovyanGFX sprite buffer is big-endian; TJpg default is little-endian
     TJpgDec.setCallback(jpegOutput);
 
     uint16_t w = 0, h = 0;

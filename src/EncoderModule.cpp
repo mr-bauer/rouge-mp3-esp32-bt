@@ -186,7 +186,7 @@ void updateEncoder()
         if (screenBrightness < 0) screenBrightness = 0;
         if (screenBrightness > 255) screenBrightness = 255;
         
-        ledcWrite(BL_PWM_CHANNEL, screenBrightness);
+        setScreenBrightness(screenBrightness);
         
         lastBrightnessChange = millis();
         displayNeedsUpdate = true;

@@ -26,7 +26,7 @@ unsigned long pressStartTime[5] = { 0, 0, 0, 0, 0 };
 // INTERRUPT HANDLERS
 // ============================================================================
 
-void IRAM_ATTR handleInterrupt(int index) {
+void handleInterrupt(int index) {
   unsigned long now = millis();
   
   if (now - lastPressTime[index] > BUTTON_DEBOUNCE_MS) {
@@ -36,11 +36,11 @@ void IRAM_ATTR handleInterrupt(int index) {
   }
 }
 
-void IRAM_ATTR onCenterButton() { handleInterrupt(BTN_IDX_CENTER); }
-void IRAM_ATTR onLeftButton() { handleInterrupt(BTN_IDX_LEFT); }
-void IRAM_ATTR onTopButton() { handleInterrupt(BTN_IDX_TOP); }
-void IRAM_ATTR onBottomButton() { handleInterrupt(BTN_IDX_BOTTOM); }
-void IRAM_ATTR onRightButton() { handleInterrupt(BTN_IDX_RIGHT); }
+void onCenterButton() { handleInterrupt(BTN_IDX_CENTER); }
+void onLeftButton() { handleInterrupt(BTN_IDX_LEFT); }
+void onTopButton() { handleInterrupt(BTN_IDX_TOP); }
+void onBottomButton() { handleInterrupt(BTN_IDX_BOTTOM); }
+void onRightButton() { handleInterrupt(BTN_IDX_RIGHT); }
 
 // ============================================================================
 // INITIALIZATION
