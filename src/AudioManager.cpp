@@ -4,6 +4,7 @@
 #include "Navigation.h"
 #include "Display.h"
 #include "Preferences.h"  // NEW
+#include "AlbumArt.h"
 
 #include "AudioTools.h"
 #include "AudioTools/Communication/A2DPStream.h"
@@ -22,7 +23,7 @@ const char *headphoneName = "JBL TUNE235NC TWS";
 BufferRTOS<uint8_t> buffer(0);
 QueueStream<uint8_t> out(buffer);
 MP3DecoderHelix decoder;
-
+MetaDataFilterDecoder filtered_mp3(decoder);
 AudioSourceSDFAT<SdFat32, File32> source(startFilePath, ext, 32);
 AudioPlayer player(source, out, decoder);
 BluetoothA2DPSource a2dp;
@@ -333,7 +334,8 @@ void audioLoop()
 void playCurrentSong(bool updateDisplay)
 {
     Serial.println("🔍 Starting playback...");
-    
+    clearAlbumArt();  // Always clear stale art before any early returns
+
     if (!bluetoothConnected) {
         Serial.println("❌ Cannot play - Bluetooth disconnected");
         currentTitle = "BT Disconnected";
@@ -371,7 +373,10 @@ void playCurrentSong(bool updateDisplay)
     
     // Reset buffer to ensure clean start
     buffer.reset();
-    
+
+    // Load album art from ID3 tags using audio source's SdFat32 instance
+    loadAlbumArt(source.getAudioFs(), song.path.c_str());
+
     Serial.println("   Opening file...");
     if (!player.setPath(song.path.c_str())) {
         Serial.printf("❌ Could not open file: %s\n", song.path.c_str());

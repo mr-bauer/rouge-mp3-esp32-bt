@@ -134,6 +134,7 @@ extern unsigned long lastBrightnessChange;
 // Display control - NEW
 extern bool forceDisplayRedraw;
 extern int textSizePreference;  // 1 (small/6x8px) or 2 (large/12x16px)
+extern bool albumArtAvailable;
 
 // Menu functions
 void buildMainMenu();

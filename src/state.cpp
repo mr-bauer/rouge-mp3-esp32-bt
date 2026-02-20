@@ -49,6 +49,7 @@ unsigned long lastBrightnessChange = 0;
 // Display control - NEW
 bool forceDisplayRedraw = false;
 int textSizePreference = 2;  // 1 (small/6x8px) or 2 (large/12x16px)
+bool albumArtAvailable = false;
 
 // Menu builders
 void buildMainMenu() {

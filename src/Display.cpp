@@ -1,10 +1,11 @@
 #include "Display.h"
 #include "Preferences.h"
+#include "AlbumArt.h"
 #include <cstring>
 
 // Create TFT instance using HSPI
 SPIClass hspi(HSPI);
-Adafruit_ST7789 display = Adafruit_ST7789(&hspi, TFT_CS, TFT_DC, TFT_RST);
+Adafruit_ST7789 display = Adafruit_ST7789(&hspi, TFT_CS, TFT_DC, -1);
 
 volatile bool displayNeedsUpdate = false;
 SemaphoreHandle_t displayMutex = NULL;
@@ -65,6 +66,14 @@ void initDisplay()
   ledcAttachPin(TFT_BL, BL_PWM_CHANNEL);
   ledcWrite(BL_PWM_CHANNEL, 0);
   Serial.println("🔆 Backlight PWM initialized on GPIO7 (TX)");
+
+  pinMode(TFT_RST, OUTPUT);
+  digitalWrite(TFT_RST, HIGH);
+  delay(100);
+  digitalWrite(TFT_RST, LOW);
+  delay(100);
+  digitalWrite(TFT_RST, HIGH);
+  delay(200);
 
   // Initialize display
   display.init(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -582,43 +591,66 @@ void updateVolumeScreen() {
 }
 
 void updateNowPlayingScreen() {
-  char title[128] = {0};
-  char artist[128] = {0};
-  char album[128] = {0};
-  
-  strncpy(title, currentTitle.c_str(), 127);
-  strncpy(artist, currentArtist.c_str(), 127);
-  strncpy(album, currentAlbum.c_str(), 127);
-  
+  const int ART_SIZE    = (textSizePreference == 2) ? 120 : 130;  // 120px for large text, 130px for small text
+  const int ART_Y       = 52;
+  const int ART_X       = (SCREEN_WIDTH - ART_SIZE) / 2;
+  const int TEXT_Y_ART  = ART_Y + ART_SIZE + 6;
+  const int TEXT_Y_BARE = 80;
+
   display.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
-  
-  int centerY = 80;
-  
+
+  bool showArt = albumArtAvailable;
+  if (showArt) {
+    // Validate bounds before drawing
+    if (ART_X < 0 || ART_Y < 0 || (ART_X + ART_SIZE) > SCREEN_WIDTH || (ART_Y + ART_SIZE) > SCREEN_HEIGHT) {
+      Serial.printf("⚠️ Album art bounds invalid: x=%d, y=%d, size=%d\n", ART_X, ART_Y, ART_SIZE);
+      showArt = false;  // Skip drawing
+    } else {
+      display.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, COLOR_BG);
+      drawAlbumArt(ART_X, ART_Y, ART_SIZE);
+    }
+  }
+
+  int centerY = showArt ? TEXT_Y_ART : TEXT_Y_BARE;
+  int maxTitleLines = showArt ? 2 : 3;
+
+  char title[128]  = {0};
+  char artist[128] = {0};
+  char album[128]  = {0};
+
+  strncpy(title,  currentTitle.c_str(),  127);
+  strncpy(artist, currentArtist.c_str(), 127);
+  strncpy(album,  currentAlbum.c_str(),  127);
+
   if (strlen(title) > 0) {
     display.setTextSize(textSizePreference);
     display.setTextColor(COLOR_TEXT);
 
-    String titleStr = String(title);
+    String titleStr  = String(title);
     int charsPerLine = (textSizePreference == 1) ? 33 : 16;
     int lineSpacing  = (textSizePreference == 1) ? 10 : 20;
 
-    for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
+    for (int line = 0; line < maxTitleLines && !titleStr.isEmpty(); line++) {
       String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
       drawCenteredText(chunk.c_str(), centerY + line * lineSpacing, textSizePreference);
       titleStr = titleStr.substring(chunk.length());
     }
 
-    centerY += (textSizePreference == 1) ? 40 : 70;
+    if (showArt) {
+      centerY += (textSizePreference == 1) ? 28 : 48;
+    } else {
+      centerY += (textSizePreference == 1) ? 40 : 70;
+    }
   }
-  
+
   if (strlen(artist) > 0) {
     display.setTextSize(1);
     display.setTextColor(COLOR_DISABLED);
     drawCenteredText(artist, centerY);
     centerY += 16;
   }
-  
-  if (strlen(album) > 0) {
+
+  if (strlen(album) > 0 && centerY <= 205) {
     display.setTextSize(1);
     display.setTextColor(COLOR_DISABLED);
     drawCenteredText(album, centerY);
