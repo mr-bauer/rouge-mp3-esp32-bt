@@ -5,10 +5,10 @@
 
 // Button pin definitions
 #define BTN_CENTER 4
-#define BTN_LEFT 37
-#define BTN_TOP 39
-#define BTN_BOTTOM 34
-#define BTN_RIGHT 36
+#define BTN_LEFT   39
+#define BTN_TOP    36
+#define BTN_RIGHT  34
+#define BTN_BOTTOM 37
 
 // Track button states
 volatile bool btnPressed[5] = { false, false, false, false, false };
@@ -65,10 +65,10 @@ void initButtons() {
   
   Serial.println("✅ Buttons initialized");
   Serial.println("   Center: GPIO4 (internal pull-up)");
-  Serial.println("   Left: GPIO37 (external pull-up)");
-  Serial.println("   Top: GPIO39 (external pull-up)");
-  Serial.println("   Bottom: GPIO34 (external pull-up)");
-  Serial.println("   Right: GPIO36 (external pull-up)");
+  Serial.println("   Left: GPIO39 (external pull-up)");
+  Serial.println("   Top: GPIO36 (external pull-up)");
+  Serial.println("   Bottom: GPIO37 (external pull-up)");
+  Serial.println("   Right: GPIO34 (external pull-up)");
 }
 
 // ============================================================================

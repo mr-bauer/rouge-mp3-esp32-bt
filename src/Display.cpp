@@ -58,7 +58,7 @@ void initDisplay()
 
   // LovyanGFX handles SPI init, reset sequence, and backlight PWM internally
   display.init();
-  display.setRotation(3);
+  display.setRotation(2);
   display.fillScreen(COLOR_BG);
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
