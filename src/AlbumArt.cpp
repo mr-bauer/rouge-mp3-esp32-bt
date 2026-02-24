@@ -31,6 +31,30 @@ static uint32_t readUint32BE(const uint8_t* b) {
            ((uint32_t)b[2] <<  8) |  (uint32_t)b[3];
 }
 
+// Returns true only if the JPEG uses Baseline DCT (SOF0 marker, 0xFF 0xC0).
+// TJpgDec does not support Progressive JPEG (SOF2) or other non-baseline types.
+// Feeding a progressive JPEG to drawJpg() causes a heap-corrupting buffer overflow
+// that manifests as a NULL FreeRTOS queue assertion crash.
+static bool isBaselineJpeg(const uint8_t* data, size_t len) {
+    if (len < 4) return false;
+    size_t pos = 2;  // skip SOI marker (FF D8)
+    while (pos + 3 < len) {
+        if (data[pos] != 0xFF) return false;  // lost marker sync
+        uint8_t marker = data[pos + 1];
+        if (marker == 0xC0) return true;   // SOF0: Baseline DCT — supported
+        if (marker == 0xC2) return false;  // SOF2: Progressive DCT — NOT supported
+        // Other non-baseline SOF types (excluding DHT=C4, JPG ext=C8, DAC=CC)
+        if (marker >= 0xC1 && marker <= 0xCF &&
+            marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
+            return false;
+        }
+        uint16_t segLen = ((uint16_t)data[pos + 2] << 8) | data[pos + 3];
+        if (segLen < 2) break;
+        pos += 2 + segLen;
+    }
+    return true;  // couldn't find SOF marker — assume baseline to be permissive
+}
+
 bool loadAlbumArt(SdFat32& sd, const char* mp3Path) {
     clearAlbumArt();
 
@@ -143,6 +167,14 @@ bool loadAlbumArt(SdFat32& sd, const char* mp3Path) {
         // Verify JPEG magic bytes (FF D8)
         if (jpegLen < 2 || tmp[off] != 0xFF || tmp[off + 1] != 0xD8) {
             Serial.println("⚠️  Album art is not JPEG, skipping");
+            free(tmp);
+            return false;
+        }
+
+        // Reject non-baseline JPEGs — TJpgDec only handles Baseline DCT (SOF0).
+        // Progressive JPEGs (SOF2) pass header parsing but corrupt heap during decode.
+        if (!isBaselineJpeg(tmp + off, jpegLen)) {
+            Serial.println("⚠️  Album art is progressive JPEG — skipping (TJpgDec requires baseline)");
             free(tmp);
             return false;
         }

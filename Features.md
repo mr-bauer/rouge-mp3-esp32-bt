@@ -66,7 +66,7 @@
 
 ## Known Bugs
 
-- [ ] **Audio crash on certain songs** — some MP3 files cause a crash during playback; needs investigation. Enable verbose AudioTools logging (`AudioLogger::instance().begin(Serial, AudioLogger::Debug)`) to capture the offending frame/metadata, then narrow down whether it's a malformed ID3 tag, a Helix decoder edge case, or a buffer overrun
+- [x] **Audio crash on certain songs** — fixed. Two root causes: (1) `MetaDataFilterDecoder` intercepts the `setAudioInfo()` notification from the Helix decoder, leaving `AudioPlayer`'s internal `FadeStream` uninitialized — fixed by manually providing `AudioInfo(44100/2ch/16-bit)` in `playCurrentSong()` before `player.play()`; (2) `TJpgDec` does not support Progressive JPEG (SOF2) embedded album art — fixed by detecting and skipping non-baseline JPEGs in `loadAlbumArt()` before they reach the decoder.
 
 ---
 
