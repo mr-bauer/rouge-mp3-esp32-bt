@@ -335,20 +335,27 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
     #endif
   }
 
+  // On the home screen, show the currently highlighted item name as the title
+  std::string mainMenuTitle;
   const char* headerText = "ROUGE MP3";
-  switch(currentMenu) {
-    case MENU_MAIN: headerText = "Main Menu"; break;
-    case MENU_MUSIC: headerText = "Music"; break;
-    case MENU_SETTINGS: headerText = "Settings"; break;
-    case MENU_BLUETOOTH: headerText = "Bluetooth"; break;
-    case MENU_ARTIST_LIST: headerText = "Artists"; break;
-    case MENU_ALBUM_LIST: headerText = "Albums"; break;
-    case MENU_SONG_LIST: headerText = "Songs"; break;
-    case MENU_NOW_PLAYING: headerText = "Now Playing"; break;
+  if (currentMenu == MENU_MAIN && !currentMenuItems.empty()) {
+    mainMenuTitle = currentMenuItems[menuIndex].label;
+    headerText = mainMenuTitle.c_str();
+  } else {
+    switch(currentMenu) {
+      case MENU_MAIN: headerText = "Main Menu"; break;
+      case MENU_MUSIC: headerText = "Music"; break;
+      case MENU_SETTINGS: headerText = "Settings"; break;
+      case MENU_BLUETOOTH: headerText = "Bluetooth"; break;
+      case MENU_ARTIST_LIST: headerText = "Artists"; break;
+      case MENU_ALBUM_LIST: headerText = "Albums"; break;
+      case MENU_SONG_LIST: headerText = "Songs"; break;
+      case MENU_NOW_PLAYING: headerText = "Now Playing"; break;
+    }
   }
 
-  // Header bar
-  sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_ACCENT);
+  // Header bar — black background
+  sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_BG);
   sprite.setTextColor(COLOR_HEADER);
   drawCenteredText(sprite, headerText, 12, 2);
 
@@ -380,6 +387,116 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
 
   if (batteryCharging) {
     drawLightningIcon(SCREEN_WIDTH - iconWidth - 4, 12, COLOR_SELECTED);
+  }
+
+  sprite.setTextColor(COLOR_TEXT);
+}
+
+// ============================================================================
+// HOME SCREEN — HORIZONTAL ICON MENU
+// ============================================================================
+
+static void drawIconMusic(int cx, int cy, uint16_t color) {
+  // Two beamed eighth notes (~25% larger)
+  sprite.fillEllipse(cx - 12, cy + 17, 9, 6, color);  // left note head
+  sprite.fillRect(cx - 5, cy - 20, 2, 37, color);      // left stem
+  sprite.fillEllipse(cx + 12, cy + 17, 9, 6, color);  // right note head
+  sprite.fillRect(cx + 19, cy - 20, 2, 37, color);     // right stem
+  sprite.fillRect(cx - 5, cy - 22, 26, 5, color);      // beam connecting tops
+}
+
+static void drawIconNowPlaying(int cx, int cy, uint16_t color) {
+  // Circle outline with play triangle inside (~25% larger)
+  sprite.drawCircle(cx, cy, 25, color);
+  sprite.drawCircle(cx, cy, 24, color);  // 2px thick ring
+  sprite.fillTriangle(cx - 9, cy - 15, cx - 9, cy + 15, cx + 17, cy, color);
+}
+
+static void drawIconSettings(int cx, int cy, uint16_t color) {
+  // Three horizontal slider bars with handles at alternating positions (~25% larger)
+  const int barYs[3]    = { cy - 16, cy, cy + 16 };
+  const int handleXs[3] = { cx + 8,  cx - 8, cx + 8 };
+  for (int i = 0; i < 3; i++) {
+    sprite.fillRect(cx - 20, barYs[i] - 2, 40, 4, color);
+    sprite.fillCircle(handleXs[i], barYs[i], 6, COLOR_BG);    // punch out under handle
+    sprite.drawCircle(handleXs[i], barYs[i], 6, color);       // handle ring
+  }
+}
+
+static void drawIconBluetooth(int cx, int cy, uint16_t color) {
+  // Bluetooth rune — scaled ~25% larger, spine 3px, arms/ears 2px
+  // Spine — 3px wide
+  for (int dx = -1; dx <= 1; dx++)
+    sprite.drawLine(cx + dx, cy - 23, cx + dx, cy + 23, color);
+  // Upper-right arm: top → right-mid (2px via +1y parallel)
+  sprite.drawLine(cx,    cy - 23, cx + 15, cy - 9,  color);
+  sprite.drawLine(cx,    cy - 22, cx + 15, cy - 8,  color);
+  // Right-mid → center
+  sprite.drawLine(cx + 15, cy - 9,  cx, cy,     color);
+  sprite.drawLine(cx + 15, cy - 8,  cx, cy + 1, color);
+  // Lower-right arm: center → right-lower
+  sprite.drawLine(cx,    cy,     cx + 15, cy + 9,  color);
+  sprite.drawLine(cx,    cy + 1, cx + 15, cy + 10, color);
+  // Right-lower → bottom
+  sprite.drawLine(cx + 15, cy + 9,  cx, cy + 23, color);
+  sprite.drawLine(cx + 15, cy + 10, cx, cy + 24, color);
+  // Left ears (2px)
+  sprite.drawLine(cx, cy - 9,  cx - 12, cy - 19, color);
+  sprite.drawLine(cx, cy - 8,  cx - 12, cy - 18, color);
+  sprite.drawLine(cx, cy + 9,  cx - 12, cy + 19, color);
+  sprite.drawLine(cx, cy + 10, cx - 12, cy + 20, color);
+}
+
+void drawHomeScreen(int selectedIdx) {
+  sprite.fillRect(0, UI_HEADER_HEIGHT, SCREEN_WIDTH,
+                  SCREEN_HEIGHT - UI_HEADER_HEIGHT, COLOR_BG);
+
+  const int ZONE_W     = SCREEN_WIDTH / 4;  // 80px per zone
+  const int ICON_CY    = 115;
+  const int BOX_TOP    = 82;
+  const int BOX_BOTTOM = 152;
+
+  for (int i = 0; i < (int)currentMenuItems.size() && i < 4; i++) {
+    const MenuItem& item = currentMenuItems[i];
+    bool selected = (i == selectedIdx);
+    bool enabled  = item.enabled;
+    int  zoneCX   = ZONE_W * i + ZONE_W / 2;
+
+    uint16_t iconColor, labelColor;
+    if (selected && enabled) {
+      iconColor  = COLOR_TEXT;
+      labelColor = COLOR_SELECTED;
+    } else if (selected && !enabled) {
+      iconColor  = COLOR_DISABLED;
+      labelColor = COLOR_DISABLED;
+    } else if (enabled) {
+      iconColor  = COLOR_DISABLED;
+      labelColor = COLOR_DISABLED;
+    } else {
+      iconColor  = 0x39E7;  // dark gray (dimmer than disabled)
+      labelColor = 0x39E7;
+    }
+
+    // Selection border — 3px thick rounded rect around the zone
+    if (selected) {
+      uint16_t borderColor = enabled ? COLOR_SELECTED : 0x02E0;  // green or dark green
+      int bx = ZONE_W * i + 4;
+      int by = BOX_TOP;
+      int bw = ZONE_W - 8;
+      int bh = BOX_BOTTOM - BOX_TOP;
+      sprite.drawRoundRect(bx,     by,     bw,     bh,     8, borderColor);
+      sprite.drawRoundRect(bx + 1, by + 1, bw - 2, bh - 2, 7, borderColor);
+      sprite.drawRoundRect(bx + 2, by + 2, bw - 4, bh - 4, 6, borderColor);
+    }
+
+    // Icon
+    switch (i) {
+      case 0: drawIconMusic(zoneCX, ICON_CY, iconColor); break;
+      case 1: drawIconNowPlaying(zoneCX, ICON_CY, iconColor); break;
+      case 2: drawIconSettings(zoneCX, ICON_CY, iconColor); break;
+      case 3: drawIconBluetooth(zoneCX, ICON_CY, iconColor); break;
+    }
+
   }
 
   sprite.setTextColor(COLOR_TEXT);
@@ -676,7 +793,8 @@ void updateDisplay()
   int sngIdx = songIndex;
 
   // Check for state changes
-  bool fullRedraw = (menu != lastMenu) || forceDisplayRedraw;
+  // MENU_MAIN always forces a full redraw so the dynamic header title stays current
+  bool fullRedraw = (menu != lastMenu) || forceDisplayRedraw || (menu == MENU_MAIN);
   lastMenu = menu;
 
   if (forceDisplayRedraw) {
@@ -729,8 +847,10 @@ void updateDisplay()
     updateMusicBrowserList(menu, albIdx, fullRedraw);
   } else if (menu == MENU_SONG_LIST) {
     updateMusicBrowserList(menu, sngIdx, fullRedraw);
+  } else if (menu == MENU_MAIN) {
+    drawHomeScreen(idx);
   } else {
-    // MENU_MAIN, MENU_MUSIC, MENU_BLUETOOTH
+    // MENU_MUSIC, MENU_BLUETOOTH
     updateMenuList(menu, idx, fullRedraw);
   }
 

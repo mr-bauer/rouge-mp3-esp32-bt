@@ -27,6 +27,11 @@ int volumeModeTicks = 0;
 // Button suppression during scrolling
 unsigned long lastEncoderMovement = 0;
 
+// Home screen scroll debounce — require multiple ticks to move between icons
+static int homeTickAccum = 0;
+static int homeTickDir   = 0;
+static const int HOME_SCROLL_THRESHOLD = 3;
+
 void IRAM_ATTR encoderISR()
 {
   encoder.tick();
@@ -201,23 +206,52 @@ void updateEncoder()
       }
       
       // Handle based on current menu
-      if (currentMenu == MENU_MAIN || currentMenu == MENU_MUSIC || 
-          currentMenu == MENU_SETTINGS || currentMenu == MENU_BLUETOOTH)
+      if (currentMenu == MENU_MAIN)
+      {
+        // Debounce: require HOME_SCROLL_THRESHOLD consecutive ticks in the same
+        // direction before moving the home screen icon selection.
+        if (step == homeTickDir) {
+          homeTickAccum++;
+        } else {
+          homeTickDir  = step;
+          homeTickAccum = 1;
+        }
+
+        if (homeTickAccum >= HOME_SCROLL_THRESHOLD) {
+          homeTickAccum = 0;
+          int oldIndex = menuIndex;
+          int listSize = currentMenuItems.size();
+
+          menuIndex += step;
+          if (menuIndex < 0) menuIndex = 0;
+          else if (menuIndex >= listSize) menuIndex = listSize - 1;
+
+          if (oldIndex != menuIndex) {
+            displayNeedsUpdate = true;
+
+            #ifdef DEBUG
+            Serial.printf("Home: %d -> %d\n", oldIndex, menuIndex);
+            #endif
+          }
+        }
+      }
+      else if (currentMenu == MENU_MUSIC ||
+               currentMenu == MENU_SETTINGS || currentMenu == MENU_BLUETOOTH)
       {
         int oldIndex = menuIndex;
         int listSize = currentMenuItems.size();
-        
+
         menuIndex += step;
-        
+
         if (menuIndex < 0) {
           menuIndex = 0;
         } else if (menuIndex >= listSize) {
           menuIndex = listSize - 1;
         }
-        
+
         if (oldIndex != menuIndex) {
           displayNeedsUpdate = true;
-          
+
           #ifdef DEBUG
           Serial.printf("Menu: %d -> %d\n", oldIndex, menuIndex);
           #endif
@@ -340,6 +374,8 @@ void updateEncoder()
       historyIndex = 0;
       consecutiveSameDirection = 0;
       lastScrollDirection = 0;
+      homeTickAccum = 0;
+      homeTickDir   = 0;
     }
   }
 }
