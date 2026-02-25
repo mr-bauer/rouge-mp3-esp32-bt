@@ -4,8 +4,8 @@
 #include <LovyanGFX.hpp>
 #include "State.h"
 
-// Display dimensions
-#define SCREEN_WIDTH 240
+// Display dimensions (visual, after rotation 3 — 240x320 panel in landscape)
+#define SCREEN_WIDTH  320
 #define SCREEN_HEIGHT 240
 
 // HSPI pins for display
@@ -21,7 +21,7 @@
 #define BL_PWM_FREQ 5000
 #define BL_PWM_RESOLUTION 8  // 8-bit (0-255)
 
-// LovyanGFX display driver configuration for ST7789 240x240 on HSPI
+// LovyanGFX display driver configuration for ST7789 240x320 on HSPI (rotation 3 → 320x240 landscape)
 class LGFX : public lgfx::LGFX_Device {
     lgfx::Panel_ST7789 _panel_instance;
     lgfx::Bus_SPI      _bus_instance;
@@ -46,10 +46,10 @@ public:
           cfg.pin_cs    = TFT_CS;
           cfg.pin_rst   = TFT_RST;
           cfg.pin_busy  = -1;
-          cfg.memory_width  = SCREEN_WIDTH;
-          cfg.memory_height = 320;  // ST7789 has 240x320 internal memory
-          cfg.panel_width   = SCREEN_WIDTH;
-          cfg.panel_height  = SCREEN_HEIGHT;
+          cfg.memory_width  = 240;   // ST7789 physical memory width (always 240)
+          cfg.memory_height = 320;   // ST7789 physical memory height (always 320)
+          cfg.panel_width   = 240;   // Physical panel width
+          cfg.panel_height  = 320;   // Physical panel height (240x320 panel)
           cfg.offset_x = 0; cfg.offset_y = 0; cfg.offset_rotation = 0;
           cfg.dummy_read_pixel = 8; cfg.dummy_read_bits = 1;
           cfg.readable   = false;
@@ -89,7 +89,7 @@ inline int uiMaxVisibleItems() { return textSizePreference == 1 ? 13 : 5; }
 #define COLOR_HEADER   0xFFFF  // White
 
 extern LGFX display;
-extern lgfx::LGFX_Sprite sprite;  // full-screen off-screen buffer (240x240, PSRAM)
+extern lgfx::LGFX_Sprite sprite;  // full-screen off-screen buffer (320x240, PSRAM ~150KB)
 extern volatile bool displayNeedsUpdate;
 extern SemaphoreHandle_t displayMutex;
 

@@ -58,14 +58,14 @@ void initDisplay()
 
   // LovyanGFX handles SPI init, reset sequence, and backlight PWM internally
   display.init();
-  display.setRotation(2);
+  display.setRotation(3);
   display.fillScreen(COLOR_BG);
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
 
   Serial.println("✅ Display initialized");
 
-  // Allocate full-screen sprite in PSRAM (~112KB at 16bpp)
+  // Allocate full-screen sprite in PSRAM (~150KB at 16bpp for 320x240)
   // Must call setPsram(true) — LGFX_Sprite defaults to DMA (internal) allocation
   // which cannot fit 115KB. setPsram(true) uses MALLOC_CAP_SPIRAM with DMA fallback.
   sprite.setColorDepth(16);
@@ -78,13 +78,14 @@ void initDisplay()
   }
 
   // Show splash screen (direct to display — before display task starts)
-  display.setCursor(30, 100);
+  // Text widths at 6px/char base: size3="ROUGE"=90px, size2="MP3 Player"=120px, size1="Loading..."=60px
+  display.setCursor((SCREEN_WIDTH - 90) / 2, 90);   // "ROUGE" centered
   display.setTextSize(3);
   display.println("ROUGE");
-  display.setCursor(50, 130);
+  display.setCursor((SCREEN_WIDTH - 120) / 2, 125);  // "MP3 Player" centered
   display.setTextSize(2);
   display.println("MP3 Player");
-  display.setCursor(60, 160);
+  display.setCursor((SCREEN_WIDTH - 60) / 2, 160);   // "Loading..." centered
   display.setTextSize(1);
   display.println("Loading...");
 
@@ -157,11 +158,11 @@ void drawLightningIcon(int x, int y, uint16_t color) {
 }
 
 // Truncate text to fit a menu item row at the current font size.
-// Size 2: 17 chars max (12px/char × 17 = 204px + 8px pad = 212px < 220px before arrow)
-// Size 1: 35 chars max (6px/char × 35 = 210px + 8px pad = 218px < 220px before arrow)
+// Available width = 320 - 8px padding - 20px arrow = 292px
+// Size 1: 6px/char → 48 chars max; Size 2: 12px/char → 24 chars max
 static std::string truncateForDisplay(const char* text) {
   if (!text) return "";
-  int maxChars = (textSizePreference == 1) ? 35 : 17;
+  int maxChars = (textSizePreference == 1) ? 48 : 24;
   std::string s(text);
   if ((int)s.length() <= maxChars) return s;
   return s.substr(0, maxChars - 3) + "...";
@@ -579,68 +580,86 @@ void updateVolumeScreen() {
 }
 
 void updateNowPlayingScreen() {
-  const int ART_SIZE    = (textSizePreference == 2) ? 120 : 130;
-  const int ART_Y       = 52;
-  const int ART_X       = (SCREEN_WIDTH - ART_SIZE) / 2;
-  const int TEXT_Y_ART  = ART_Y + ART_SIZE + 6;
-  const int TEXT_Y_BARE = 80;
-
-  sprite.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
-
-  bool showArt = albumArtAvailable;
-  if (showArt) {
-    if (ART_X < 0 || ART_Y < 0 || (ART_X + ART_SIZE) > SCREEN_WIDTH || (ART_Y + ART_SIZE) > SCREEN_HEIGHT) {
-      Serial.printf("⚠️ Album art bounds invalid: x=%d, y=%d, size=%d\n", ART_X, ART_Y, ART_SIZE);
-      showArt = false;
-    } else {
-      sprite.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, COLOR_BG);
-      drawAlbumArt(ART_X, ART_Y, ART_SIZE);
-    }
-  }
-
-  int centerY = showArt ? TEXT_Y_ART : TEXT_Y_BARE;
-  int maxTitleLines = showArt ? 2 : 3;
+  sprite.fillRect(0, UI_HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - UI_HEADER_HEIGHT, COLOR_BG);
 
   char title[128]  = {0};
   char artist[128] = {0};
   char album[128]  = {0};
-
   strncpy(title,  currentTitle.c_str(),  127);
   strncpy(artist, currentArtist.c_str(), 127);
   strncpy(album,  currentAlbum.c_str(),  127);
 
-  if (strlen(title) > 0) {
-    sprite.setTextSize(textSizePreference);
-    sprite.setTextColor(COLOR_TEXT);
+  if (albumArtAvailable) {
+    // Side-by-side layout: art on left, text on right
+    const int ART_SIZE = 130;
+    const int ART_X    = 10;
+    const int ART_Y    = 55;
+    const int TEXT_X   = ART_X + ART_SIZE + 12;  // 152
+    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8;  // 160px
 
-    String titleStr  = String(title);
-    int charsPerLine = (textSizePreference == 1) ? 33 : 16;
-    int lineSpacing  = (textSizePreference == 1) ? 10 : 20;
+    sprite.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, COLOR_BG);
+    drawAlbumArt(ART_X, ART_Y, ART_SIZE);
 
-    for (int line = 0; line < maxTitleLines && !titleStr.isEmpty(); line++) {
-      String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
-      drawCenteredText(sprite, chunk.c_str(), centerY + line * lineSpacing, textSizePreference);
-      titleStr = titleStr.substring(chunk.length());
+    int charsPerLine = TEXT_W / (textSizePreference == 1 ? 6 : 12);
+    int lineSpacing  = textSizePreference == 1 ? 10 : 22;
+    int y = 90;
+
+    if (strlen(title) > 0) {
+      sprite.setTextSize(textSizePreference);
+      sprite.setTextColor(COLOR_TEXT);
+      String titleStr = String(title);
+      for (int line = 0; line < 2 && !titleStr.isEmpty(); line++) {
+        String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
+        sprite.setCursor(TEXT_X, y + line * lineSpacing);
+        sprite.print(chunk.c_str());
+        titleStr = titleStr.substring(chunk.length());
+      }
+      y += 2 * lineSpacing + 8;
     }
 
-    if (showArt) {
-      centerY += (textSizePreference == 1) ? 28 : 48;
-    } else {
-      centerY += (textSizePreference == 1) ? 40 : 70;
+    sprite.setTextSize(1);
+    sprite.setTextColor(COLOR_DISABLED);
+    if (strlen(artist) > 0) {
+      String s = String(artist);
+      if ((int)s.length() > TEXT_W / 6) s = s.substring(0, TEXT_W / 6);
+      sprite.setCursor(TEXT_X, y);
+      sprite.print(s);
+      y += 16;
     }
-  }
+    if (strlen(album) > 0 && y < SCREEN_HEIGHT - 10) {
+      String s = String(album);
+      if ((int)s.length() > TEXT_W / 6) s = s.substring(0, TEXT_W / 6);
+      sprite.setCursor(TEXT_X, y);
+      sprite.print(s);
+    }
 
-  if (strlen(artist) > 0) {
+  } else {
+    // No art: centered layout using full width
+    int charsPerLine = textSizePreference == 1 ? 46 : 24;
+    int lineSpacing  = textSizePreference == 1 ? 10 : 20;
+    int y = 80;
+
+    if (strlen(title) > 0) {
+      sprite.setTextSize(textSizePreference);
+      sprite.setTextColor(COLOR_TEXT);
+      String titleStr = String(title);
+      for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
+        String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
+        drawCenteredText(sprite, chunk.c_str(), y + line * lineSpacing, textSizePreference);
+        titleStr = titleStr.substring(chunk.length());
+      }
+      y += textSizePreference == 1 ? 50 : 80;
+    }
+
     sprite.setTextSize(1);
     sprite.setTextColor(COLOR_DISABLED);
-    drawCenteredText(sprite, artist, centerY);
-    centerY += 16;
-  }
-
-  if (strlen(album) > 0 && centerY <= 205) {
-    sprite.setTextSize(1);
-    sprite.setTextColor(COLOR_DISABLED);
-    drawCenteredText(sprite, album, centerY);
+    if (strlen(artist) > 0) {
+      drawCenteredText(sprite, artist, y);
+      y += 16;
+    }
+    if (strlen(album) > 0 && y <= SCREEN_HEIGHT - 20) {
+      drawCenteredText(sprite, album, y);
+    }
   }
 }
 
