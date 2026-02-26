@@ -326,6 +326,46 @@ int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart,
 // COMPONENT UPDATE FUNCTIONS
 // ============================================================================
 
+static void drawBatteryIcon(int x, int y, int percent, bool charging) {
+  const int W       = 32;   // body width
+  const int H       = 16;   // body height
+  const int NUB_W   = 4;    // nub width
+  const int NUB_H   = 8;    // nub height
+  const int INSET   = 2;    // border thickness
+  const int INNER_W = W - 2 * INSET;  // 28
+  const int INNER_H = H - 2 * INSET;  // 12
+  const uint16_t EMPTY_COLOR = 0xC618; // light gray for uncharged portion
+
+  // 1. Charging indicator — green lightning bolt to the left of the battery
+  if (charging)
+    drawLightningIcon(x - 10, y + (H - 8) / 2, COLOR_SELECTED);
+
+  // 2. Empty portion — fill entire inner area light gray
+  sprite.fillRect(x + INSET, y + INSET, INNER_W, INNER_H, EMPTY_COLOR);
+
+  // 3. Charged portion — white fill from left edge, proportional to percent
+  int fillW = (percent * INNER_W) / 100;
+  if (fillW > 0)
+    sprite.fillRect(x + INSET, y + INSET, fillW, INNER_H, COLOR_TEXT);
+
+  // 4. Body border
+  sprite.drawRect(x, y, W, H, COLOR_TEXT);
+
+  // 5. Nub — solid white, vertically centered on body
+  sprite.fillRect(x + W, y + (H - NUB_H) / 2, NUB_W, NUB_H, COLOR_TEXT);
+
+  // 6. Number only (no %) centered on body in black
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d", percent);
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_BG);
+  int16_t tw = sprite.textWidth(buf);
+  sprite.setCursor(x + (W - tw) / 2, y + (H - 8) / 2);
+  sprite.print(buf);
+
+  sprite.setTextColor(COLOR_TEXT);
+}
+
 void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdate) {
   if (!fullRedraw && !playbackStateChanged && !periodicUpdate) return;
 
@@ -364,30 +404,12 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
     drawPlaybackIcon(8, 12, player_state);
   }
 
-  // Battery indicator
-  sprite.setTextSize(1);
-  sprite.setTextColor(COLOR_HEADER);
-
-  char batteryText[16];
-  snprintf(batteryText, sizeof(batteryText), "%d%%", batteryPercent);
-
-  int16_t w = sprite.textWidth(batteryText);
-  int iconWidth = batteryCharging ? 10 : 0;
-  sprite.setCursor(SCREEN_WIDTH - w - iconWidth - 8, 12);
-
-  if (batteryPercent <= 10) {
-    sprite.setTextColor(0xF800);  // Red
-  } else if (batteryPercent <= 20) {
-    sprite.setTextColor(0xFD20);  // Orange
-  } else {
-    sprite.setTextColor(COLOR_HEADER);
-  }
-
-  sprite.print(batteryText);
-
-  if (batteryCharging) {
-    drawLightningIcon(SCREEN_WIDTH - iconWidth - 4, 12, COLOR_SELECTED);
-  }
+  // Battery icon
+  const int BATT_W  = 32;
+  const int BATT_NW = 4;
+  int battX = SCREEN_WIDTH - BATT_W - BATT_NW - 6;
+  int battY = (UI_HEADER_HEIGHT - 16) / 2;
+  drawBatteryIcon(battX, battY, batteryPercent, batteryCharging);
 
   sprite.setTextColor(COLOR_TEXT);
 }
@@ -452,9 +474,9 @@ void drawHomeScreen(int selectedIdx) {
                   SCREEN_HEIGHT - UI_HEADER_HEIGHT, COLOR_BG);
 
   const int ZONE_W     = SCREEN_WIDTH / 4;  // 80px per zone
-  const int ICON_CY    = 115;
-  const int BOX_TOP    = 82;
-  const int BOX_BOTTOM = 152;
+  const int ICON_CY    = 140;  // center of content area: UI_HEADER_HEIGHT + (SCREEN_HEIGHT - UI_HEADER_HEIGHT) / 2
+  const int BOX_TOP    = 105;  // centered: UI_HEADER_HEIGHT + (200 - 70) / 2
+  const int BOX_BOTTOM = 175;  // BOX_TOP + 70
 
   for (int i = 0; i < (int)currentMenuItems.size() && i < 4; i++) {
     const MenuItem& item = currentMenuItems[i];
