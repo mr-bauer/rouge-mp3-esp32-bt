@@ -1,6 +1,7 @@
 #include "Display.h"
 #include "Preferences.h"
 #include "AlbumArt.h"
+#include "icons.h"
 #include <cstring>
 
 // LovyanGFX display instance and full-screen sprite (off-screen buffer in PSRAM)
@@ -418,56 +419,6 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
 // HOME SCREEN — HORIZONTAL ICON MENU
 // ============================================================================
 
-static void drawIconMusic(int cx, int cy, uint16_t color) {
-  // Two beamed eighth notes (~25% larger)
-  sprite.fillEllipse(cx - 12, cy + 17, 9, 6, color);  // left note head
-  sprite.fillRect(cx - 5, cy - 20, 2, 37, color);      // left stem
-  sprite.fillEllipse(cx + 12, cy + 17, 9, 6, color);  // right note head
-  sprite.fillRect(cx + 19, cy - 20, 2, 37, color);     // right stem
-  sprite.fillRect(cx - 5, cy - 22, 26, 5, color);      // beam connecting tops
-}
-
-static void drawIconNowPlaying(int cx, int cy, uint16_t color) {
-  // Circle outline with play triangle inside (~25% larger)
-  sprite.drawCircle(cx, cy, 25, color);
-  sprite.drawCircle(cx, cy, 24, color);  // 2px thick ring
-  sprite.fillTriangle(cx - 9, cy - 15, cx - 9, cy + 15, cx + 17, cy, color);
-}
-
-static void drawIconSettings(int cx, int cy, uint16_t color) {
-  // Three horizontal slider bars with handles at alternating positions (~25% larger)
-  const int barYs[3]    = { cy - 16, cy, cy + 16 };
-  const int handleXs[3] = { cx + 8,  cx - 8, cx + 8 };
-  for (int i = 0; i < 3; i++) {
-    sprite.fillRect(cx - 20, barYs[i] - 2, 40, 4, color);
-    sprite.fillCircle(handleXs[i], barYs[i], 6, COLOR_BG);    // punch out under handle
-    sprite.drawCircle(handleXs[i], barYs[i], 6, color);       // handle ring
-  }
-}
-
-static void drawIconBluetooth(int cx, int cy, uint16_t color) {
-  // Bluetooth rune — scaled ~25% larger, spine 3px, arms/ears 2px
-  // Spine — 3px wide
-  for (int dx = -1; dx <= 1; dx++)
-    sprite.drawLine(cx + dx, cy - 23, cx + dx, cy + 23, color);
-  // Upper-right arm: top → right-mid (2px via +1y parallel)
-  sprite.drawLine(cx,    cy - 23, cx + 15, cy - 9,  color);
-  sprite.drawLine(cx,    cy - 22, cx + 15, cy - 8,  color);
-  // Right-mid → center
-  sprite.drawLine(cx + 15, cy - 9,  cx, cy,     color);
-  sprite.drawLine(cx + 15, cy - 8,  cx, cy + 1, color);
-  // Lower-right arm: center → right-lower
-  sprite.drawLine(cx,    cy,     cx + 15, cy + 9,  color);
-  sprite.drawLine(cx,    cy + 1, cx + 15, cy + 10, color);
-  // Right-lower → bottom
-  sprite.drawLine(cx + 15, cy + 9,  cx, cy + 23, color);
-  sprite.drawLine(cx + 15, cy + 10, cx, cy + 24, color);
-  // Left ears (2px)
-  sprite.drawLine(cx, cy - 9,  cx - 12, cy - 19, color);
-  sprite.drawLine(cx, cy - 8,  cx - 12, cy - 18, color);
-  sprite.drawLine(cx, cy + 9,  cx - 12, cy + 19, color);
-  sprite.drawLine(cx, cy + 10, cx - 12, cy + 20, color);
-}
 
 void drawHomeScreen(int selectedIdx) {
   sprite.fillRect(0, UI_HEADER_HEIGHT, SCREEN_WIDTH,
@@ -511,13 +462,10 @@ void drawHomeScreen(int selectedIdx) {
       sprite.drawRoundRect(bx + 2, by + 2, bw - 4, bh - 4, 6, borderColor);
     }
 
-    // Icon
-    switch (i) {
-      case 0: drawIconMusic(zoneCX, ICON_CY, iconColor); break;
-      case 1: drawIconNowPlaying(zoneCX, ICON_CY, iconColor); break;
-      case 2: drawIconSettings(zoneCX, ICON_CY, iconColor); break;
-      case 3: drawIconBluetooth(zoneCX, ICON_CY, iconColor); break;
-    }
+    // Icon — XBM bitmap (bit1=bg, bit0=icon, so fg/bg are swapped)
+    int ix = zoneCX - ICON_W / 2;
+    int iy = ICON_CY - ICON_H / 2;
+    sprite.drawXBitmap(ix, iy, HOME_ICONS[i], ICON_W, ICON_H, (uint16_t)COLOR_BG, iconColor);
 
   }
 
