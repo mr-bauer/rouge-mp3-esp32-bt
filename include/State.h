@@ -4,7 +4,52 @@
 #include <vector>
 #include <string>
 
-// Bluetooth status
+// ============================================================================
+// TIMING CONSTANTS
+// ============================================================================
+
+// Volume control
+#define VOLUME_TIMEOUT 2000              // 2 seconds to return to song display
+#define VOLUME_ACTIVATION_TICKS 3        // Ticks needed to enter volume mode
+#define VOLUME_SAVE_DELAY 3000           // Save 3 seconds after last change
+
+// Brightness control
+#define BRIGHTNESS_TIMEOUT 3000          // 3 seconds to save and exit
+#define BRIGHTNESS_ACTIVATION_TICKS 2    // Ticks to enter brightness mode
+
+// Battery monitoring
+#define BATTERY_CHECK_INTERVAL 5000      // Check every 5 seconds
+
+// Display updates
+#define DISPLAY_HEADER_UPDATE_INTERVAL 5000  // Update header every 5 seconds
+
+// Encoder
+#define ENCODER_UPDATE_INTERVAL 90       // Throttle encoder updates (ms)
+#define ENCODER_JUMP_THRESHOLD 3         // Anti-jump protection
+#define ENCODER_DIRECTION_HISTORY_SIZE 5 // Direction filtering samples
+#define ENCODER_DIRECTION_LOCK_THRESHOLD 3  // Steps before locking direction
+
+// Button timing
+#define BUTTON_DEBOUNCE_MS 300           // General button debounce
+#define BUTTON_MIN_DURATION_ADC 10       // Min press duration for ADC pins
+#define BUTTON_SUPPRESS_TIME 300         // Suppress buttons during scroll
+
+// Bluetooth
+#define BT_WATCHDOG_INTERVAL 500         // Connection watchdog check (ms)
+
+// Watchdog
+#define WDT_TIMEOUT 30                   // Watchdog timeout (seconds)
+
+// Sleep / dim
+#define DIM_TIMEOUT_MS      30000UL      // 30 s no input → dim display
+#define SLEEP_TIMEOUT_MS   300000UL      // 5 min no input + stopped/paused → deep sleep
+#define DIM_BRIGHTNESS         15        // dimmed brightness level (0-255, ~6%)
+#define DIM_STEP_DOWN           4        // brightness units per 50 ms tick while dimming (~3 s fade)
+#define DIM_STEP_UP            20        // brightness units per 50 ms tick while restoring (~0.6 s)
+
+// ============================================================================
+// BLUETOOTH STATUS
+// ============================================================================
 extern std::string btStatus;
 
 // Menu system
@@ -93,8 +138,20 @@ extern unsigned long lastBrightnessChange;
 #define BRIGHTNESS_TIMEOUT 3000
 #define BRIGHTNESS_ACTIVATION_TICKS 2
 
+// Sleep / dim state
+extern volatile unsigned long lastActivityTime;  // millis() of last button/encoder input
+extern volatile bool          isScreenDimmed;    // true while display is dimmed
+
+// Progress tracking (set/reset by AudioManager)
+extern volatile unsigned long playbackStartMillis;  // millis() when current song started
+extern volatile unsigned long totalPausedMs;         // accumulated pause duration for this song
+extern volatile unsigned long pauseStartMillis;      // millis() when current pause began (0 if playing)
+
 // Display control - NEW
 extern bool forceDisplayRedraw;
+extern int textSizePreference;  // 1 (small/6x8px) or 2 (large/12x16px)
+extern int themeIndex;          // 0 = dark, 1 = light
+extern bool albumArtAvailable;
 
 // Menu functions
 void buildMainMenu();

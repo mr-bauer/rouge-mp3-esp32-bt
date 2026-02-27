@@ -46,8 +46,20 @@ int screenBrightness = 255;  // Default full brightness
 bool brightnessControlActive = false;
 unsigned long lastBrightnessChange = 0;
 
+// Sleep / dim state
+volatile unsigned long lastActivityTime = 0;
+volatile bool          isScreenDimmed   = false;
+
+// Progress tracking
+volatile unsigned long playbackStartMillis = 0;
+volatile unsigned long totalPausedMs       = 0;
+volatile unsigned long pauseStartMillis    = 0;
+
 // Display control - NEW
 bool forceDisplayRedraw = false;
+int textSizePreference = 2;  // 1 (small/6x8px) or 2 (large/12x16px)
+int themeIndex = 0;           // 0 = dark, 1 = light
+bool albumArtAvailable = false;
 
 // Menu builders
 void buildMainMenu() {
@@ -70,7 +82,13 @@ void buildMusicMenu() {
 
 void buildSettingsMenu() {
   currentMenuItems.clear();
-  currentMenuItems.push_back(MenuItem("Brightness", MENU_SETTINGS));  // NEW
+  currentMenuItems.push_back(MenuItem("Brightness", MENU_SETTINGS));
+  currentMenuItems.push_back(MenuItem(
+    textSizePreference == 1 ? "Text Size: Small" : "Text Size: Large",
+    MENU_SETTINGS));
+  currentMenuItems.push_back(MenuItem(
+    themeIndex == 0 ? "Theme: Dark" : "Theme: Light",
+    MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Shuffle: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Repeat: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("About", MENU_SETTINGS));

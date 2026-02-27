@@ -16,7 +16,6 @@
 #include "Preferences.h"
 #include "Battery.h"
 
-#define WDT_TIMEOUT 30
 const int cs = 32;
 
 void setup()
@@ -34,9 +33,13 @@ void setup()
         Serial.println("⚠️  Preferences init failed, using defaults");
     }
 
-    // Load saved brightness - NEW
+    // Load saved preferences
     screenBrightness = rougePrefs.loadBrightness();
     Serial.printf("💾 Loaded brightness: %d\n", screenBrightness);
+    textSizePreference = rougePrefs.loadTextSize();
+    Serial.printf("💾 Loaded text size: %d\n", textSizePreference);
+    themeIndex = rougePrefs.loadTheme();
+    Serial.printf("💾 Loaded theme: %d\n", themeIndex);
 
     // Initialize hardware modules
     initDisplay();
@@ -57,7 +60,7 @@ void setup()
         delay(100);
         display.fillScreen(COLOR_BG);
         display.setTextColor(COLOR_TEXT);
-        drawCenteredText("SD Card Error", SCREEN_HEIGHT / 2);
+        drawCenteredText(display, "SD Card Error", SCREEN_HEIGHT / 2);
         return;
     }
     Serial.println("✅ SD initialized");
@@ -71,7 +74,7 @@ void setup()
         delay(100);
         display.fillScreen(COLOR_BG);
         display.setTextColor(COLOR_TEXT);
-        drawCenteredText("Database Error", SCREEN_HEIGHT / 2);
+        drawCenteredText(display, "Database Error", SCREEN_HEIGHT / 2);
         display.setTextSize(1);
         display.setCursor(10, SCREEN_HEIGHT / 2 + 30);
         display.println("Run indexer tool");
@@ -87,7 +90,7 @@ void setup()
         delay(100);
         display.fillScreen(COLOR_BG);
         display.setTextColor(COLOR_TEXT);
-        drawCenteredText("No Artists", SCREEN_HEIGHT / 2);
+        drawCenteredText(display, "No Artists", SCREEN_HEIGHT / 2);
         return;
     }
 
@@ -116,6 +119,9 @@ void setup()
     // Enable watchdog timer
     esp_task_wdt_init(WDT_TIMEOUT, true);
     esp_task_wdt_add(NULL);
+
+    // Initialize inactivity timer so device doesn't dim immediately on boot
+    lastActivityTime = millis();
 }
 
 void loop()
@@ -134,6 +140,7 @@ void loop()
 
     // Button processing
     pollButtons();
+
 
     #ifdef DEBUG
     // Monitor heap periodically (debug builds only)

@@ -69,7 +69,6 @@ void handleCenter()
       }
       
       if (currentMenu == MENU_SETTINGS) {
-        // Check if Brightness was selected - NEW
         if (item.label == "Brightness") {
           Serial.println("🔆 Entering brightness adjustment");
           brightnessControlActive = true;
@@ -77,7 +76,31 @@ void handleCenter()
           displayNeedsUpdate = true;
           hapticSelection();
           return;
-        }        
+        }
+
+        if (item.label.find("Text Size:") == 0) {
+          textSizePreference = (textSizePreference == 1) ? 2 : 1;
+          Serial.printf("🔤 Text size changed to: %d\n", textSizePreference);
+          rougePrefs.saveTextSize(textSizePreference);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }
+
+        if (item.label.find("Theme:") == 0) {
+          themeIndex = (themeIndex == 0) ? 1 : 0;
+          Serial.printf("🎨 Theme changed to: %s\n", themeIndex == 0 ? "Dark" : "Light");
+          applyTheme(themeIndex);
+          rougePrefs.saveTheme(themeIndex);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }
+
         return;
       }
       

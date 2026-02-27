@@ -129,3 +129,61 @@ int RougePreferences::loadBrightness() {
     
     return (int)brightness;
 }
+
+// Text size functions
+void RougePreferences::saveTextSize(int size) {
+    if (!isOpen) return;
+
+    esp_err_t err = nvs_set_i32(nvsHandle, "textSize", size);
+    if (err != ESP_OK) {
+        Serial.printf("⚠️  Failed to save text size: %d\n", err);
+        return;
+    }
+
+    nvs_commit(nvsHandle);
+}
+
+int RougePreferences::loadTextSize() {
+    if (!isOpen) return 2;
+
+    int32_t size = 2;
+    esp_err_t err = nvs_get_i32(nvsHandle, "textSize", &size);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        saveTextSize(2);
+        return 2;
+    }
+
+    if (err != ESP_OK) {
+        Serial.printf("⚠️  Failed to load text size: %d\n", err);
+        return 2;
+    }
+
+    return (size == 1 || size == 2) ? (int)size : 2;
+}
+
+// Theme functions
+void RougePreferences::saveTheme(int theme) {
+    if (!isOpen) return;
+    nvs_set_i32(nvsHandle, "theme", theme);
+    nvs_commit(nvsHandle);
+}
+
+int RougePreferences::loadTheme() {
+    if (!isOpen) return 0;
+
+    int32_t theme = 0;
+    esp_err_t err = nvs_get_i32(nvsHandle, "theme", &theme);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        saveTheme(0);
+        return 0;
+    }
+
+    if (err != ESP_OK) {
+        Serial.printf("⚠️  Failed to load theme: %d\n", err);
+        return 0;
+    }
+
+    return (theme == 0 || theme == 1) ? (int)theme : 0;
+}

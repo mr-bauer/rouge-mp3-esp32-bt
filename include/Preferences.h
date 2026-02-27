@@ -21,9 +21,17 @@ public:
     void saveVolume(int volume);
     int loadVolume();
     
-    // Brightness - NEW
+    // Brightness
     void saveBrightness(int brightness);
     int loadBrightness();
+
+    // Text size
+    void saveTextSize(int size);
+    int loadTextSize();
+
+    // Theme
+    void saveTheme(int theme);
+    int loadTheme();
     
 private:
     nvs_handle_t nvsHandle;

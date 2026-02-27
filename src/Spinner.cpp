@@ -94,16 +94,16 @@ void startLoadingAnimation() {
   // Title at top
   display.setTextColor(COLOR_ACCENT);
   display.setTextSize(3);
-  drawCenteredText("ROUGE", 30);
-  
+  drawCenteredText(display, "ROUGE", 30);
+
   display.setTextColor(COLOR_TEXT);
   display.setTextSize(2);
-  drawCenteredText("MP3 Player", 65);
-  
+  drawCenteredText(display, "MP3 Player", 65);
+
   // Status at bottom
   display.setTextColor(COLOR_DISABLED);
   display.setTextSize(1);
-  drawCenteredText("Loading...", SCREEN_HEIGHT - 30);
+  drawCenteredText(display, "Loading...", SCREEN_HEIGHT - 30);
 
   BaseType_t result = xTaskCreatePinnedToCore(
     fancySpinnerTask,

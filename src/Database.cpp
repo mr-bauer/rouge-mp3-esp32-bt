@@ -162,16 +162,15 @@ std::vector<std::string> MusicDatabase::getArtistNames() {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* name = (const char*)sqlite3_column_text(stmt, 0);
             if (name) {
-                // Truncate to 20 characters (leaves room for arrow on right)
-                result.push_back(truncateString(name, 17));
+                result.push_back(name);
             }
         }
     } else {
         Serial.printf("❌ SQL error: %s\n", sqlite3_errmsg(db));
     }
-    
+
     sqlite3_finalize(stmt);
-    
+
     Serial.printf("📊 Loaded %d artists\n", result.size());
     return result;
 }
@@ -190,29 +189,18 @@ std::vector<std::string> MusicDatabase::getAlbumNamesByArtist(const std::string&
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        // Use wildcard match to handle truncated artist names
-        std::string searchPattern = artistName;
-        // Remove "..." if present for search
-        if (searchPattern.length() >= 3 && 
-            searchPattern.substr(searchPattern.length() - 3) == "...") {
-            searchPattern = searchPattern.substr(0, searchPattern.length() - 3) + "%";
-        } else {
-            searchPattern = artistName;
-        }
-        
-        sqlite3_bind_text(stmt, 1, searchPattern.c_str(), -1, SQLITE_TRANSIENT);
-        
+        sqlite3_bind_text(stmt, 1, artistName.c_str(), -1, SQLITE_TRANSIENT);
+
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char* name = (const char*)sqlite3_column_text(stmt, 0);
             if (name) {
-                // Truncate to 20 characters
-                result.push_back(truncateString(name, 17));
+                result.push_back(name);
             }
         }
     } else {
         Serial.printf("❌ SQL error: %s\n", sqlite3_errmsg(db));
     }
-    
+
     sqlite3_finalize(stmt);
     
     Serial.printf("📊 Loaded %d albums for %s\n", result.size(), artistName.c_str());
@@ -235,40 +223,26 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        // Handle truncated artist name
-        std::string artistPattern = artistName;
-        if (artistPattern.length() >= 3 && 
-            artistPattern.substr(artistPattern.length() - 3) == "...") {
-            artistPattern = artistPattern.substr(0, artistPattern.length() - 3) + "%";
-        }
-        
-        // Handle truncated album name
-        std::string albumPattern = albumName;
-        if (albumPattern.length() >= 3 && 
-            albumPattern.substr(albumPattern.length() - 3) == "...") {
-            albumPattern = albumPattern.substr(0, albumPattern.length() - 3) + "%";
-        }
-        
-        sqlite3_bind_text(stmt, 1, artistPattern.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, albumPattern.c_str(), -1, SQLITE_TRANSIENT);
-        
+        sqlite3_bind_text(stmt, 1, artistName.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, albumName.c_str(), -1, SQLITE_TRANSIENT);
+
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             Song song;
             const char* title = (const char*)sqlite3_column_text(stmt, 0);
             const char* path = (const char*)sqlite3_column_text(stmt, 1);
-            
+
             if (title) {
-                song.title = title;  // Store FULL title
-                song.displayTitle = truncateString(title, 17);  // Truncated for list
+                song.title = title;
+                song.displayTitle = title;  // Full title; display layer truncates as needed
             }
-            
+
             if (path) {
                 song.path = path;
             }
-            
+
             song.track = sqlite3_column_int(stmt, 2);
             song.duration = sqlite3_column_int(stmt, 3);
-            
+
             result.push_back(song);
         }
     } else {

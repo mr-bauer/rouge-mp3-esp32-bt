@@ -3,7 +3,8 @@
 #include "Indexer.h"
 #include "Navigation.h"
 #include "Display.h"
-#include "Preferences.h"  // NEW
+#include "Preferences.h"
+#include "AlbumArt.h"
 
 #include "AudioTools.h"
 #include "AudioTools/Communication/A2DPStream.h"
@@ -22,16 +23,14 @@ const char *headphoneName = "JBL TUNE235NC TWS";
 BufferRTOS<uint8_t> buffer(0);
 QueueStream<uint8_t> out(buffer);
 MP3DecoderHelix decoder;
-
+MetaDataFilterDecoder filtered_mp3(decoder);
 AudioSourceSDFAT<SdFat32, File32> source(startFilePath, ext, 32);
-AudioPlayer player(source, out, decoder);
+AudioPlayer player(source, out, filtered_mp3);  // filtered_mp3 strips metadata frames before Helix sees them
 BluetoothA2DPSource a2dp;
 
 // State tracking
 String last_device_name = headphoneName;
 unsigned long last_watchdog_check = 0;
-
-const unsigned long WATCHDOG_INTERVAL = 500; // ms
 
 // Volume saving - NEW
 unsigned long lastVolumeSaveTime = 0;
@@ -124,7 +123,7 @@ void audio_state_changed(esp_a2d_audio_state_t state, void* ptr) {
 // ============================================================================
 
 void checkConnectionWatchdog() {
-    if (millis() - last_watchdog_check < WATCHDOG_INTERVAL) {
+    if (millis() - last_watchdog_check < BT_WATCHDOG_INTERVAL) {
         return;
     }
     last_watchdog_check = millis();
@@ -170,6 +169,7 @@ void pausePlayback() {
     }
     
     player_state = STATE_PAUSED;
+    pauseStartMillis = millis();
     Serial.println("[PLAYER] Paused");
     // Note: Audio callback continues returning silence
 }
@@ -187,6 +187,10 @@ void resumePlayback() {
     }
     
     player_state = STATE_PLAYING;
+    if (pauseStartMillis > 0) {
+        totalPausedMs   += millis() - pauseStartMillis;
+        pauseStartMillis = 0;
+    }
     Serial.println("[PLAYER] Resumed");
 }
 
@@ -283,7 +287,7 @@ void initAudio()
     Serial.printf("🔊 Volume set to %d%%\n", currentVolume);
     
     player.setAutoNext(false);
-    player.setAutoFade(true);
+    player.setAutoFade(false);  // Disabled: auto-fades are unnecessary for this use case
 
     Serial.println("\n[BT] Configuring Bluetooth A2DP Source...");
     a2dp.set_data_callback(get_sound_data);
@@ -310,7 +314,12 @@ void audioLoop()
         try {
             copied = player.copy();
         } catch (...) {
-            Serial.println("❌ Audio copy exception!");
+            Serial.println("❌ Audio copy exception! Stopping and skipping...");
+            player_state = STATE_STOPPED;
+            player.stop();
+            buffer.reset();
+            delay(50);
+            autoNext();
             return;
         }
         
@@ -335,7 +344,8 @@ void audioLoop()
 void playCurrentSong(bool updateDisplay)
 {
     Serial.println("🔍 Starting playback...");
-    
+    clearAlbumArt();  // Always clear stale art before any early returns
+
     if (!bluetoothConnected) {
         Serial.println("❌ Cannot play - Bluetooth disconnected");
         currentTitle = "BT Disconnected";
@@ -373,18 +383,44 @@ void playCurrentSong(bool updateDisplay)
     
     // Reset buffer to ensure clean start
     buffer.reset();
-    
+
+    // Reset progress tracking
+    playbackStartMillis = millis();
+    totalPausedMs       = 0;
+    pauseStartMillis    = 0;
+
+    // Load album art from ID3 tags using audio source's SdFat32 instance
+    loadAlbumArt(source.getAudioFs(), song.path.c_str());
+
     Serial.println("   Opening file...");
-    if (!player.setPath(song.path.c_str())) {
-        Serial.printf("❌ Could not open file: %s\n", song.path.c_str());
-        currentTitle = "Error: Cannot open";
+    try {
+        if (!player.setPath(song.path.c_str())) {
+            Serial.printf("❌ Could not open file: %s\n", song.path.c_str());
+            currentTitle = "Error: Cannot open";
+            displayNeedsUpdate = true;
+            autoNext();
+            return;
+        }
+
+        // MetaDataFilterDecoder intercepts the setAudioInfo() notification that
+        // the Helix decoder emits after parsing the first frame, so AudioPlayer's
+        // internal FadeStream never gets initialized and rejects all audio data.
+        // BT A2DP always requires 44100/2ch/16-bit, so we can safely provide it here.
+        AudioInfo btFormat;
+        btFormat.sample_rate = 44100;
+        btFormat.channels = 2;
+        btFormat.bits_per_sample = 16;
+        player.setAudioInfo(btFormat);
+
+        Serial.println("   Starting playback...");
+        player.play();
+    } catch (...) {
+        Serial.printf("❌ Exception opening/starting: %s\n", song.path.c_str());
+        currentTitle = "Error: Bad file";
         displayNeedsUpdate = true;
         autoNext();
         return;
     }
-    
-    Serial.println("   Starting playback...");
-    player.play();
     player_state = STATE_PLAYING;
     
     Serial.println("✅ Playback started");
