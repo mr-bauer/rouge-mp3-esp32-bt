@@ -89,6 +89,18 @@ void handleCenter()
           return;
         }
 
+        if (item.label.find("Theme:") == 0) {
+          themeIndex = (themeIndex == 0) ? 1 : 0;
+          Serial.printf("🎨 Theme changed to: %s\n", themeIndex == 0 ? "Dark" : "Light");
+          applyTheme(themeIndex);
+          rougePrefs.saveTheme(themeIndex);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }
+
         return;
       }
       

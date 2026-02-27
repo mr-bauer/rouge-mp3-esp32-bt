@@ -80,14 +80,16 @@ inline int uiMaxVisibleItems() { return textSizePreference == 1 ? 13 : 5; }
 #define UI_SCROLL_INDICATOR_WIDTH 50
 #define UI_SUBHEADER_OFFSET 15
 
-// Colors (16-bit RGB565)
-#define COLOR_BG        0x0000  // Black
-#define COLOR_TEXT      0xFFFF  // White
-#define COLOR_SELECTED  0x07E0  // Green
-#define COLOR_DISABLED  0x7BEF  // Gray
-#define COLOR_ACCENT    0x051F  // Dark Blue (kept for future theme use)
-#define COLOR_HEADER    0xFFFF  // White
-#define COLOR_SEPARATOR 0x4208  // Dark gray — header/content separator line
+// Colors — runtime globals set by applyTheme() (0 = dark, 1 = light)
+extern uint16_t COLOR_BG;
+extern uint16_t COLOR_TEXT;
+extern uint16_t COLOR_SELECTED;
+extern uint16_t COLOR_DISABLED;
+extern uint16_t COLOR_ACCENT;
+extern uint16_t COLOR_HEADER;
+extern uint16_t COLOR_SEPARATOR;
+
+void applyTheme(int themeIdx);
 
 extern LGFX display;
 extern lgfx::LGFX_Sprite sprite;  // full-screen off-screen buffer (320x240, PSRAM ~150KB)

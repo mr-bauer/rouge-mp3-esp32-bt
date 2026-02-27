@@ -28,6 +28,10 @@ public:
     // Text size
     void saveTextSize(int size);
     int loadTextSize();
+
+    // Theme
+    void saveTheme(int theme);
+    int loadTheme();
     
 private:
     nvs_handle_t nvsHandle;

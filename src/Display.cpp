@@ -30,6 +30,39 @@ static int activeBrightness = -1;  // -1 = uninitialized
 static int targetBrightness = -1;  // -1 = uninitialized
 
 // ============================================================================
+// COLOR THEME GLOBALS
+// ============================================================================
+
+// Initialized to dark theme; updated by applyTheme()
+uint16_t COLOR_BG        = 0x0000;
+uint16_t COLOR_TEXT      = 0xFFFF;
+uint16_t COLOR_SELECTED  = 0x07E0;
+uint16_t COLOR_DISABLED  = 0x7BEF;
+uint16_t COLOR_ACCENT    = 0x051F;
+uint16_t COLOR_HEADER    = 0xFFFF;
+uint16_t COLOR_SEPARATOR = 0x4208;
+
+void applyTheme(int themeIdx) {
+  if (themeIdx == 1) {  // Light
+    COLOR_BG        = 0xFFFF;
+    COLOR_TEXT      = 0x0000;
+    COLOR_SELECTED  = 0x03DA;  // Material blue ~RGB(0,121,214) — white text readable
+    COLOR_DISABLED  = 0x4208;
+    COLOR_ACCENT    = 0x001F;
+    COLOR_HEADER    = 0x0000;
+    COLOR_SEPARATOR = 0xC618;
+  } else {              // Dark (default)
+    COLOR_BG        = 0x0000;
+    COLOR_TEXT      = 0xFFFF;
+    COLOR_SELECTED  = 0x07E0;
+    COLOR_DISABLED  = 0x7BEF;
+    COLOR_ACCENT    = 0x051F;
+    COLOR_HEADER    = 0xFFFF;
+    COLOR_SEPARATOR = 0x4208;
+  }
+}
+
+// ============================================================================
 // SLEEP / DIM MANAGEMENT
 // ============================================================================
 
@@ -119,6 +152,9 @@ void displayTask(void *param) {
 void initDisplay()
 {
   Serial.println("🖥️  Initializing ST7789 display (LovyanGFX + HSPI)...");
+
+  // Apply saved theme before first render
+  applyTheme(themeIndex);
 
   // LovyanGFX handles SPI init, reset sequence, and backlight PWM internally
   display.init();

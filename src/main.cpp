@@ -38,6 +38,8 @@ void setup()
     Serial.printf("💾 Loaded brightness: %d\n", screenBrightness);
     textSizePreference = rougePrefs.loadTextSize();
     Serial.printf("💾 Loaded text size: %d\n", textSizePreference);
+    themeIndex = rougePrefs.loadTheme();
+    Serial.printf("💾 Loaded theme: %d\n", themeIndex);
 
     // Initialize hardware modules
     initDisplay();

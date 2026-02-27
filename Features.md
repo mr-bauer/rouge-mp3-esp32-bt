@@ -44,6 +44,7 @@
 | Adjustable text size | Small (size 1) and Large (size 2) modes, toggled from Settings and saved to NVS |
 | Screen brightness control | PWM-controlled via LovyanGFX; encoder-adjusted from Settings; saved to NVS |
 | Scroll position indicator | Shows current index within a list |
+| Themes | Dark theme (default) and Light theme (white-based); toggled from Settings; `applyTheme()` swaps 7 runtime color globals; saved to NVS |
 
 ### Hardware
 
@@ -103,7 +104,6 @@ None currently.
 
 ### Display / UI
 
-- [ ] **Themes** — define a `ColorTheme` struct in `Display.h` and swap the current `COLOR_*` constants at runtime; start with a Dark theme (current) and a Light theme (white background, dark text), with room to add more; save active theme to NVS
 - [ ] **Better fonts via LovyanGFX** — LovyanGFX supports custom bitmap fonts (converted with `fontconvert`) and the U8g2 font library; replacing the default 5×7 bitmap font with a proportional or anti-aliased font would significantly improve readability
 - [ ] **PNG album art support** — `AlbumArt.cpp` only decodes JPEG (`FF D8` check); PNG (`89 50 4E 47`) embedded art is silently skipped
 - [ ] **Scrolling song title** — long titles in Now Playing are truncated; a marquee scroll would show the full title
