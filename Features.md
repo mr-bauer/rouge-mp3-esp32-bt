@@ -37,6 +37,8 @@
 | Loading spinner | Animated dot-ring spinner runs on a FreeRTOS task during startup |
 | Now Playing screen | Shows current artist, album, song title, and album art |
 | JPEG album art | Parses ID3v2 APIC frames directly from MP3 files; renders via TJpg_Decoder into the sprite |
+| Song progress bar | Full-width bar at bottom of Now Playing; fills green proportional to elapsed/total; resets on track change |
+| Elapsed / total time | MM:SS elapsed (left) and MM:SS total (right) below the progress bar; freezes while paused; shows `--:--` if duration missing from DB |
 | Header bar | Displays current context title, battery percentage, and charging indicator |
 | Control bar | Shows play/pause state icon and scroll position indicator |
 | Adjustable text size | Small (size 1) and Large (size 2) modes, toggled from Settings and saved to NVS |
@@ -67,7 +69,7 @@
 
 ## Known Bugs
 
-- [x] **Audio crash on certain songs** — fixed. Two root causes: (1) `MetaDataFilterDecoder` intercepts the `setAudioInfo()` notification from the Helix decoder, leaving `AudioPlayer`'s internal `FadeStream` uninitialized — fixed by manually providing `AudioInfo(44100/2ch/16-bit)` in `playCurrentSong()` before `player.play()`; (2) `TJpgDec` does not support Progressive JPEG (SOF2) embedded album art — fixed by detecting and skipping non-baseline JPEGs in `loadAlbumArt()` before they reach the decoder.
+None currently.
 
 ---
 
@@ -85,8 +87,6 @@
 ### Audio & Playback
 
 - [ ] **Additional audio formats** — currently only `.mp3` is supported (hardcoded `ext = "mp3"` in `AudioManager.cpp`); candidates are FLAC, AAC, OGG Vorbis, and WAV — each requires a matching arduino-audio-tools codec and potentially more PSRAM buffer headroom
-- [ ] **Song progress bar** — Now Playing screen has no seek indicator; would require ID3 duration metadata and tracking playback position from the audio buffer
-- [ ] **Elapsed / remaining time** — display MM:SS elapsed and/or MM:SS remaining in Now Playing
 - [ ] **Sleep timer** — auto-pause/stop playback after N minutes; configurable from Settings
 
 ### Bluetooth

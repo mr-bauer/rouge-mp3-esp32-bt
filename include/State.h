@@ -142,6 +142,11 @@ extern unsigned long lastBrightnessChange;
 extern volatile unsigned long lastActivityTime;  // millis() of last button/encoder input
 extern volatile bool          isScreenDimmed;    // true while display is dimmed
 
+// Progress tracking (set/reset by AudioManager)
+extern volatile unsigned long playbackStartMillis;  // millis() when current song started
+extern volatile unsigned long totalPausedMs;         // accumulated pause duration for this song
+extern volatile unsigned long pauseStartMillis;      // millis() when current pause began (0 if playing)
+
 // Display control - NEW
 extern bool forceDisplayRedraw;
 extern int textSizePreference;  // 1 (small/6x8px) or 2 (large/12x16px)

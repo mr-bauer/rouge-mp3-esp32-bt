@@ -50,6 +50,11 @@ unsigned long lastBrightnessChange = 0;
 volatile unsigned long lastActivityTime = 0;
 volatile bool          isScreenDimmed   = false;
 
+// Progress tracking
+volatile unsigned long playbackStartMillis = 0;
+volatile unsigned long totalPausedMs       = 0;
+volatile unsigned long pauseStartMillis    = 0;
+
 // Display control - NEW
 bool forceDisplayRedraw = false;
 int textSizePreference = 2;  // 1 (small/6x8px) or 2 (large/12x16px)

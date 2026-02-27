@@ -169,6 +169,7 @@ void pausePlayback() {
     }
     
     player_state = STATE_PAUSED;
+    pauseStartMillis = millis();
     Serial.println("[PLAYER] Paused");
     // Note: Audio callback continues returning silence
 }
@@ -186,6 +187,10 @@ void resumePlayback() {
     }
     
     player_state = STATE_PLAYING;
+    if (pauseStartMillis > 0) {
+        totalPausedMs   += millis() - pauseStartMillis;
+        pauseStartMillis = 0;
+    }
     Serial.println("[PLAYER] Resumed");
 }
 
@@ -378,6 +383,11 @@ void playCurrentSong(bool updateDisplay)
     
     // Reset buffer to ensure clean start
     buffer.reset();
+
+    // Reset progress tracking
+    playbackStartMillis = millis();
+    totalPausedMs       = 0;
+    pauseStartMillis    = 0;
 
     // Load album art from ID3 tags using audio source's SdFat32 instance
     loadAlbumArt(source.getAudioFs(), song.path.c_str());

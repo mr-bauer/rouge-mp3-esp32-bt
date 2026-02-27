@@ -83,6 +83,16 @@ void displayTask(void *param) {
     manageSleep();      // check inactivity → dim flag or deep sleep
     stepBrightness();   // smooth brightness transition toward target
 
+    // Tick the Now Playing progress bar once per second while playing
+    static unsigned long lastProgressTick = 0;
+    if (currentMenu == MENU_NOW_PLAYING && player_state == STATE_PLAYING) {
+      unsigned long now = millis();
+      if (now - lastProgressTick >= 1000) {
+        lastProgressTick = now;
+        displayNeedsUpdate = true;
+      }
+    }
+
     if (displayNeedsUpdate) {
       if (xSemaphoreTake(displayMutex, portMAX_DELAY)) {
         updateDisplay();
@@ -801,6 +811,51 @@ void updateNowPlayingScreen() {
       drawCenteredText(sprite, album, y);
     }
   }
+
+  // ── Progress bar + time labels (both layouts) ─────────────────────────────
+  // Compute elapsed seconds, accounting for accumulated pause time
+  unsigned long elapsed = 0;
+  if (playbackStartMillis > 0) {
+    unsigned long paused = totalPausedMs;
+    if (player_state == STATE_PAUSED && pauseStartMillis > 0)
+      paused += millis() - pauseStartMillis;
+    unsigned long rawMs = millis() - playbackStartMillis;
+    elapsed = (rawMs > paused) ? (rawMs - paused) / 1000 : 0;
+  }
+
+  int duration = (songIndex >= 0 && songIndex < (int)songs.size())
+                 ? songs[songIndex].duration : 0;
+  if (duration > 0 && (int)elapsed > duration) elapsed = duration;
+
+  const int BAR_X = 8;
+  const int BAR_Y = 196;
+  const int BAR_W = SCREEN_WIDTH - 16;  // 304px
+  const int BAR_H = 8;
+
+  sprite.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, COLOR_DISABLED);
+
+  if (duration > 0) {
+    int fillW = (int)((long)elapsed * (BAR_W - 4) / duration);
+    if (fillW > BAR_W - 4) fillW = BAR_W - 4;
+    if (fillW > 0)
+      sprite.fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, COLOR_SELECTED);
+  }
+
+  char elapsedStr[8], totalStr[8];
+  snprintf(elapsedStr, sizeof(elapsedStr), "%d:%02d",
+           (int)elapsed / 60, (int)elapsed % 60);
+  if (duration > 0)
+    snprintf(totalStr, sizeof(totalStr), "%d:%02d", duration / 60, duration % 60);
+  else
+    snprintf(totalStr, sizeof(totalStr), "--:--");
+
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_DISABLED);
+  sprite.setCursor(BAR_X, BAR_Y + BAR_H + 4);
+  sprite.print(elapsedStr);
+  sprite.setCursor(BAR_X + BAR_W - sprite.textWidth(totalStr), BAR_Y + BAR_H + 4);
+  sprite.print(totalStr);
+  sprite.setTextColor(COLOR_TEXT);
 }
 
 // ============================================================================
