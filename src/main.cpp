@@ -117,6 +117,9 @@ void setup()
     // Enable watchdog timer
     esp_task_wdt_init(WDT_TIMEOUT, true);
     esp_task_wdt_add(NULL);
+
+    // Initialize inactivity timer so device doesn't dim immediately on boot
+    lastActivityTime = millis();
 }
 
 void loop()
@@ -135,6 +138,7 @@ void loop()
 
     // Button processing
     pollButtons();
+
 
     #ifdef DEBUG
     // Monitor heap periodically (debug builds only)

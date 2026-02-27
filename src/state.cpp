@@ -46,6 +46,10 @@ int screenBrightness = 255;  // Default full brightness
 bool brightnessControlActive = false;
 unsigned long lastBrightnessChange = 0;
 
+// Sleep / dim state
+volatile unsigned long lastActivityTime = 0;
+volatile bool          isScreenDimmed   = false;
+
 // Display control - NEW
 bool forceDisplayRedraw = false;
 int textSizePreference = 2;  // 1 (small/6x8px) or 2 (large/12x16px)

@@ -61,6 +61,7 @@
 | Watchdog timer | 30-second hardware watchdog prevents lockup |
 | FreeRTOS display task | Display runs on Core 0 at 50ms intervals; audio processing runs on Core 1 |
 | Display mutex | `displayMutex` protects the display bus between the spinner task and the main display task |
+| Auto-dim + screen-off | Dims to ~6% brightness after 30s of inactivity; turns screen fully off after 5 min if stopped/paused; smooth fade in/out; wakes on button press |
 
 ---
 
@@ -111,10 +112,11 @@
 
 ### Settings / Persistence
 
-- [ ] **Deep sleep mode** — enter ESP32 deep sleep (via `esp_deep_sleep_start()`) after a configurable period of inactivity; wake on button press using GPIO wakeup; saves significant battery vs. display dim alone
+- [ ] **True sleep mode (deep or light)** — blocked by IRAM overflow: both `esp_deep_sleep_start()` and `esp_light_sleep_start()` require ~3,640B of IRAM for their power-down sequence, but the firmware only has ~1,081B headroom (BT A2DP + coexist fills IRAM). Screen-off mode is the current workaround (~40–50mA savings from backlight). To unlock true sleep: rebuild ESP-IDF SDK with `CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y` and `CONFIG_ESP32_WIFI_ENABLED=0` (frees `libcoexist.a` IRAM, ~2,973B — enough headroom if WiFi is also excluded); or switch to ESP-IDF framework directly in PlatformIO.
+- [ ] **CPU frequency scaling** — call `setCpuFrequencyMhz(80)` when player is stopped/paused and screen is dimmed; restore to 240MHz on activity. Saves ~60mA (240→80MHz), zero IRAM cost. Integrate into `manageSleep()` in `Display.cpp` alongside the existing brightness logic.
+- [ ] **Disable WiFi** — call `WiFi.mode(WIFI_OFF)` in `setup()` since WiFi is never used. Saves ~333B IRAM (frees `libesp_wifi.a` + `libesp_phy.a`); `libcoexist.a` stays (required by BT stack). Negligible runtime power savings but cleans up dead code.
 - [ ] **Volume in Settings** — volume is encoder-activated from Now Playing, but not visible or adjustable from the Settings menu directly
 - [ ] **Restore last-played position** — remember `artistIndex`, `albumIndex`, `songIndex` across power cycles (save to NVS on track change)
-- [ ] **Auto-dim / sleep display** — dim or blank screen after N seconds of inactivity; wake on button press (lighter alternative to full deep sleep)
 
 ### Infrastructure / Code Health
 

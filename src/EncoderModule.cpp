@@ -96,6 +96,7 @@ void updateEncoder()
     }
     lastEncoderUpdate = now;
     lastEncoderMovement = now;
+    lastActivityTime = now;     // reset inactivity timer
     
     // Normalize to single step
     int step = (delta > 0) ? -1 : 1;

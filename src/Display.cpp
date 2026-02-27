@@ -24,12 +24,65 @@ static unsigned long lastHeaderUpdate = 0;
 // Import scroll direction from EncoderModule
 extern int lastScrollDirection;
 
+// Current hardware brightness and desired target (separate from user pref so
+// dim/sleep never corrupts the NVS-saved screenBrightness value)
+static int activeBrightness = -1;  // -1 = uninitialized
+static int targetBrightness = -1;  // -1 = uninitialized
+
+// ============================================================================
+// SLEEP / DIM MANAGEMENT
+// ============================================================================
+
+static void manageSleep() {
+  unsigned long idle = millis() - lastActivityTime;
+
+  // Compute brightness target based on inactivity level:
+  //   active       → user's full brightness
+  //   dim timeout  → DIM_BRIGHTNESS (faint glow)
+  //   sleep timeout (not playing) → 0 (screen off, wake on button press)
+  int newTarget;
+  if (idle < DIM_TIMEOUT_MS) {
+    isScreenDimmed = false;
+    newTarget = screenBrightness;
+  } else if (idle < SLEEP_TIMEOUT_MS ||
+             (player_state == STATE_PLAYING)) {
+    isScreenDimmed = true;
+    newTarget = DIM_BRIGHTNESS;
+  } else {
+    // Stopped or paused + sleep timeout reached → screen off
+    isScreenDimmed = true;
+    newTarget = 0;
+  }
+  targetBrightness = newTarget;
+}
+
+static void stepBrightness() {
+  if (activeBrightness < 0 || targetBrightness < 0) {
+    // First run: sync to current user brightness without fading
+    activeBrightness = targetBrightness = screenBrightness;
+    display.setBrightness(activeBrightness);
+    return;
+  }
+  if (activeBrightness == targetBrightness) return;
+
+  // Slow dim, fast restore
+  if (activeBrightness > targetBrightness)
+    activeBrightness = max(activeBrightness - DIM_STEP_DOWN, targetBrightness);
+  else
+    activeBrightness = min(activeBrightness + DIM_STEP_UP,   targetBrightness);
+
+  display.setBrightness(activeBrightness);
+}
+
 // ============================================================================
 // DISPLAY TASK
 // ============================================================================
 
 void displayTask(void *param) {
   while(1) {
+    manageSleep();      // check inactivity → dim flag or deep sleep
+    stepBrightness();   // smooth brightness transition toward target
+
     if (displayNeedsUpdate) {
       if (xSemaphoreTake(displayMutex, portMAX_DELAY)) {
         updateDisplay();

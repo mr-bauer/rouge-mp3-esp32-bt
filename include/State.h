@@ -40,6 +40,13 @@
 // Watchdog
 #define WDT_TIMEOUT 30                   // Watchdog timeout (seconds)
 
+// Sleep / dim
+#define DIM_TIMEOUT_MS      30000UL      // 30 s no input → dim display
+#define SLEEP_TIMEOUT_MS   300000UL      // 5 min no input + stopped/paused → deep sleep
+#define DIM_BRIGHTNESS         15        // dimmed brightness level (0-255, ~6%)
+#define DIM_STEP_DOWN           4        // brightness units per 50 ms tick while dimming (~3 s fade)
+#define DIM_STEP_UP            20        // brightness units per 50 ms tick while restoring (~0.6 s)
+
 // ============================================================================
 // BLUETOOTH STATUS
 // ============================================================================
@@ -130,6 +137,10 @@ extern bool brightnessControlActive;
 extern unsigned long lastBrightnessChange;
 #define BRIGHTNESS_TIMEOUT 3000
 #define BRIGHTNESS_ACTIVATION_TICKS 2
+
+// Sleep / dim state
+extern volatile unsigned long lastActivityTime;  // millis() of last button/encoder input
+extern volatile bool          isScreenDimmed;    // true while display is dimmed
 
 // Display control - NEW
 extern bool forceDisplayRedraw;

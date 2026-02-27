@@ -2,6 +2,7 @@
 #include "Navigation.h"
 #include "Haptics.h"
 #include "EncoderModule.h"
+#include "State.h"
 
 // Button pin definitions
 #define BTN_CENTER 4
@@ -28,11 +29,13 @@ unsigned long pressStartTime[5] = { 0, 0, 0, 0, 0 };
 
 void handleInterrupt(int index) {
   unsigned long now = millis();
-  
+
   if (now - lastPressTime[index] > BUTTON_DEBOUNCE_MS) {
     pressStartTime[index] = now;
     btnPressed[index] = true;
     lastPressTime[index] = now;
+    // NOTE: lastActivityTime is set after glitch filtering in pollButtons(),
+    // not here, so noise-induced ISR triggers don't reset the inactivity timer.
   }
 }
 
@@ -93,14 +96,15 @@ bool processADCButton(int btnIndex, int gpio, const char* name,
       }
       
       Serial.printf("🔘 %s button pressed\n", name);
-      
+      lastActivityTime = millis();  // confirmed press — reset inactivity timer
+
       // Apply appropriate haptic feedback
       if (strcmp(name, "Top") == 0) {
         hapticBack();  // Special haptic for back button
       } else {
         hapticButtonPress();
       }
-      
+
       handler(handlerIndex);
       return true;
     }
@@ -128,6 +132,7 @@ void pollButtons() {
       Serial.println("🔇 Center button suppressed (scrolling)");
     } else {
       Serial.println("🔘 Center button pressed");
+      lastActivityTime = millis();  // confirmed press — reset inactivity timer
       hapticButtonPress();
       handleButtonPress(0);
     }
