@@ -29,6 +29,10 @@ extern int lastScrollDirection;
 static int activeBrightness = -1;  // -1 = uninitialized
 static int targetBrightness = -1;  // -1 = uninitialized
 
+// Set true by the 1s progress tick — updateNowPlayingScreen() skips JPEG
+// decode and only repaints the bottom progress-bar strip
+static bool nowPlayingProgressOnly = false;
+
 // ============================================================================
 // COLOR THEME GLOBALS
 // ============================================================================
@@ -116,12 +120,31 @@ void displayTask(void *param) {
     manageSleep();      // check inactivity → dim flag or deep sleep
     stepBrightness();   // smooth brightness transition toward target
 
-    // Tick the Now Playing progress bar once per second while playing
+    unsigned long now = millis();
+
+    // Tick the Now Playing progress bar once per second while playing.
+    // Set nowPlayingProgressOnly so only the bottom strip is repainted (no JPEG decode).
     static unsigned long lastProgressTick = 0;
     if (currentMenu == MENU_NOW_PLAYING && player_state == STATE_PLAYING) {
-      unsigned long now = millis();
       if (now - lastProgressTick >= 1000) {
         lastProgressTick = now;
+        nowPlayingProgressOnly = true;
+        displayNeedsUpdate = true;
+      }
+    }
+
+    // Periodic header refresh (battery / BT status / play-pause icon).
+    // Fires only when periodicHeaderUpdate would be true in updateDisplay(),
+    // so the early-return path is guaranteed to execute — no JPEG decode.
+    if (now - lastHeaderUpdate > DISPLAY_HEADER_UPDATE_INTERVAL) {
+      displayNeedsUpdate = true;
+    }
+
+    // Tick BT scan header animation every 500 ms while scanning
+    static unsigned long lastScanTick = 0;
+    if (btScanning && currentMenu == MENU_BT_SCAN) {
+      if (now - lastScanTick >= 500) {
+        lastScanTick = now;
         displayNeedsUpdate = true;
       }
     }
@@ -487,6 +510,7 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
       case MENU_MUSIC: headerText = "Music"; break;
       case MENU_SETTINGS: headerText = "Settings"; break;
       case MENU_BLUETOOTH: headerText = "Bluetooth"; break;
+      case MENU_BT_SCAN: headerText = btScanning ? "BT Scan..." : "BT Scan"; break;
       case MENU_ARTIST_LIST: headerText = "Artists"; break;
       case MENU_ALBUM_LIST: headerText = "Albums"; break;
       case MENU_SONG_LIST: headerText = "Songs"; break;
@@ -766,6 +790,62 @@ void updateVolumeScreen() {
 }
 
 void updateNowPlayingScreen() {
+  // ── Fast path: 1s progress tick — only repaint the bottom strip ──────────
+  // Avoids JPEG decode and full text redraw on every tick.
+  if (nowPlayingProgressOnly) {
+    nowPlayingProgressOnly = false;
+
+    // Compute elapsed (same as full path below)
+    unsigned long elapsed = 0;
+    if (playbackStartMillis > 0) {
+      unsigned long paused = totalPausedMs;
+      if (player_state == STATE_PAUSED && pauseStartMillis > 0)
+        paused += millis() - pauseStartMillis;
+      unsigned long rawMs = millis() - playbackStartMillis;
+      elapsed = (rawMs > paused) ? (rawMs - paused) / 1000 : 0;
+    }
+    int duration = (songIndex >= 0 && songIndex < (int)songs.size())
+                   ? songs[songIndex].duration : 0;
+    if (duration > 0 && (int)elapsed > duration) elapsed = duration;
+
+    const int BAR_X = 8;
+    const int BAR_Y = 196;
+    const int BAR_W = SCREEN_WIDTH - 16;
+    const int BAR_H = 8;
+    const int STRIP_Y = BAR_Y - 4;  // small margin above bar
+
+    // Clear only the bottom strip
+    sprite.fillRect(0, STRIP_Y, SCREEN_WIDTH, SCREEN_HEIGHT - STRIP_Y, COLOR_BG);
+
+    // Bar outline + fill
+    sprite.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, COLOR_DISABLED);
+    if (duration > 0) {
+      int fillW = (int)((long)elapsed * (BAR_W - 4) / duration);
+      if (fillW > BAR_W - 4) fillW = BAR_W - 4;
+      if (fillW > 0)
+        sprite.fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, COLOR_SELECTED);
+    }
+
+    // Time labels
+    char elapsedStr[8], totalStr[8];
+    snprintf(elapsedStr, sizeof(elapsedStr), "%d:%02d",
+             (int)elapsed / 60, (int)elapsed % 60);
+    if (duration > 0)
+      snprintf(totalStr, sizeof(totalStr), "%d:%02d", duration / 60, duration % 60);
+    else
+      snprintf(totalStr, sizeof(totalStr), "--:--");
+
+    sprite.setTextSize(1);
+    sprite.setTextColor(COLOR_DISABLED);
+    sprite.setCursor(BAR_X, BAR_Y + BAR_H + 4);
+    sprite.print(elapsedStr);
+    sprite.setCursor(BAR_X + BAR_W - sprite.textWidth(totalStr), BAR_Y + BAR_H + 4);
+    sprite.print(totalStr);
+    sprite.setTextColor(COLOR_TEXT);
+    return;
+  }
+  // ── Full redraw ───────────────────────────────────────────────────────────
+
   sprite.fillRect(0, UI_HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - UI_HEADER_HEIGHT, COLOR_BG);
 
   char title[128]  = {0};
@@ -947,6 +1027,9 @@ void updateDisplay()
     if (volumeControlActive) {
       updateVolumeScreen();
     } else {
+      // On state changes (new song or menu arrival) force the full render path
+      // even if the 1s ticker happened to set nowPlayingProgressOnly in the same tick
+      if (fullRedraw || playbackStateChanged) nowPlayingProgressOnly = false;
       updateNowPlayingScreen();
     }
   } else if (menu == MENU_SETTINGS) {
@@ -964,7 +1047,7 @@ void updateDisplay()
   } else if (menu == MENU_MAIN) {
     drawHomeScreen(idx);
   } else {
-    // MENU_MUSIC, MENU_BLUETOOTH
+    // MENU_MUSIC, MENU_BLUETOOTH, MENU_BT_SCAN — all plain list menus
     updateMenuList(menu, idx, fullRedraw);
   }
 

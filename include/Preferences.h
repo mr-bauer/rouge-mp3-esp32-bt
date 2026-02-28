@@ -32,7 +32,11 @@ public:
     // Theme
     void saveTheme(int theme);
     int loadTheme();
-    
+
+    // BT device name
+    void saveBTDevice(const char* name);
+    String loadBTDevice();  // returns "" if not saved
+
 private:
     nvs_handle_t nvsHandle;
     bool isOpen;

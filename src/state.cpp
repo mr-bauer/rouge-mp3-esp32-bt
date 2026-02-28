@@ -4,6 +4,8 @@
 
 // Bluetooth status
 std::string btStatus = "BT Ready";
+volatile bool btScanning = false;
+std::vector<std::string> btFoundDevices;
 
 // Menu state
 MenuType currentMenu = MENU_MAIN;
@@ -97,7 +99,7 @@ void buildSettingsMenu() {
 
 void buildBluetoothMenu() {
   currentMenuItems.clear();
-  
+
   if (bluetoothConnected) {
     currentMenuItems.push_back(MenuItem("Status: Connected", MENU_BLUETOOTH));
     currentMenuItems.push_back(MenuItem("Disconnect", MENU_BLUETOOTH));
@@ -105,7 +107,20 @@ void buildBluetoothMenu() {
     currentMenuItems.push_back(MenuItem("Status: Disconnected", MENU_BLUETOOTH));
     currentMenuItems.push_back(MenuItem("Reconnect", MENU_BLUETOOTH));
   }
-  
+  currentMenuItems.push_back(MenuItem("Scan Devices", MENU_BT_SCAN));
+
+  menuIndex = 0;
+}
+
+void buildBTScanMenu() {
+  currentMenuItems.clear();
+  for (const auto& name : btFoundDevices) {
+    currentMenuItems.push_back(MenuItem(name.c_str(), MENU_BT_SCAN));
+  }
+  if (btFoundDevices.empty()) {
+    currentMenuItems.push_back(MenuItem(
+      btScanning ? "Scanning..." : "No devices found", MENU_BT_SCAN, false));
+  }
   menuIndex = 0;
 }
 
@@ -130,6 +145,9 @@ void navigateToMenu(MenuType menu) {
       break;
     case MENU_BLUETOOTH:
       buildBluetoothMenu();
+      break;
+    case MENU_BT_SCAN:
+      buildBTScanMenu();
       break;
     case MENU_ARTIST_LIST:
       // Keep existing artist list

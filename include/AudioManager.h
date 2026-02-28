@@ -17,5 +17,6 @@ void playCurrentSong(bool updateDisplay);
 void reconnectBluetooth();
 void disconnectBluetooth();
 void changeBluetoothDevice(const String& new_device_name);
+void startBTScan();
 
 #endif

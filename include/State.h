@@ -51,6 +51,8 @@
 // BLUETOOTH STATUS
 // ============================================================================
 extern std::string btStatus;
+extern volatile bool btScanning;                  // true while BT inquiry is running
+extern std::vector<std::string> btFoundDevices;   // device names collected during scan
 
 // Menu system
 enum MenuType {
@@ -58,6 +60,7 @@ enum MenuType {
   MENU_MUSIC,
   MENU_SETTINGS,
   MENU_BLUETOOTH,
+  MENU_BT_SCAN,       // BT device scan results screen
   MENU_ARTIST_LIST,
   MENU_ALBUM_LIST,
   MENU_SONG_LIST,
@@ -158,6 +161,7 @@ void buildMainMenu();
 void buildMusicMenu();
 void buildSettingsMenu();
 void buildBluetoothMenu();
+void buildBTScanMenu();
 void navigateToMenu(MenuType menu);
 void navigateBack();
 

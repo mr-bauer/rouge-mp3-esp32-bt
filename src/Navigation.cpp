@@ -55,17 +55,33 @@ void handleCenter()
         if (item.label == "Reconnect") {
           Serial.println("User requested Bluetooth reconnect");
           reconnectBluetooth();
+          buildBluetoothMenu();
+          displayNeedsUpdate = true;
         } else if (item.label == "Disconnect") {
           Serial.println("User requested Bluetooth disconnect");
           disconnectBluetooth();
+          buildBluetoothMenu();
+          displayNeedsUpdate = true;
+        } else if (item.action == MENU_BT_SCAN) {
+          // "Scan Devices" — start scan and navigate to scan screen
+          startBTScan();
+          navigateToMenu(MENU_BT_SCAN);
+          displayNeedsUpdate = true;
+        } else if (item.label.find("Status:") != 0) {
+          navigateToMenu(item.action);
+          displayNeedsUpdate = true;
         }
-        
-        if (item.label.find("Status:") == 0) {
-          return;
-        }
-        
-        buildBluetoothMenu();
+        return;
+      }
+
+      // Handle BT scan results
+      if (currentMenu == MENU_BT_SCAN) {
+        if (!item.enabled) return;  // "Scanning..." or "No devices found" — not selectable
+        Serial.printf("User selected BT device: %s\n", item.label.c_str());
+        changeBluetoothDevice(String(item.label.c_str()));
+        navigateBack();
         displayNeedsUpdate = true;
+        return;
       }
       
       if (currentMenu == MENU_SETTINGS) {

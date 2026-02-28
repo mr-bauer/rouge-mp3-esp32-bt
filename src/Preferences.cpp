@@ -187,3 +187,19 @@ int RougePreferences::loadTheme() {
 
     return (theme == 0 || theme == 1) ? (int)theme : 0;
 }
+
+// BT device name functions
+void RougePreferences::saveBTDevice(const char* name) {
+    if (!isOpen || !name) return;
+    nvs_set_str(nvsHandle, "btDevice", name);
+    nvs_commit(nvsHandle);
+}
+
+String RougePreferences::loadBTDevice() {
+    if (!isOpen) return "";
+    char buf[64] = {};
+    size_t len = sizeof(buf);
+    esp_err_t err = nvs_get_str(nvsHandle, "btDevice", buf, &len);
+    if (err != ESP_OK) return "";
+    return String(buf);
+}

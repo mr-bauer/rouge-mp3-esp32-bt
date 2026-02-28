@@ -52,17 +52,51 @@ int32_t get_sound_data(uint8_t* data, int32_t bytes) {
 }
 
 // ============================================================================
+// BLUETOOTH DEVICE SCAN CALLBACKS
+// ============================================================================
+
+// Called for each device found during BT inquiry; return false = don't connect
+static bool btScanCallback(const char* name, esp_bd_addr_t addr, int rssi) {
+    if (name && strlen(name) > 0) {
+        for (const auto& n : btFoundDevices) {
+            if (n == name) return false;
+        }
+        btFoundDevices.push_back(std::string(name));
+        Serial.printf("[BT Scan] Found: %s (RSSI: %d)\n", name, rssi);
+        if (currentMenu == MENU_BT_SCAN) {
+            buildBTScanMenu();
+            displayNeedsUpdate = true;
+        }
+    }
+    return false;  // never auto-connect during scan
+}
+
+// Called when inquiry starts or stops
+static void btDiscoveryModeCallback(esp_bt_gap_discovery_state_t discoveryMode) {
+    if (discoveryMode == ESP_BT_GAP_DISCOVERY_STOPPED) {
+        Serial.println("[BT Scan] Discovery complete");
+        btScanning = false;
+        a2dp.set_ssid_callback(nullptr);
+        a2dp.set_discovery_mode_callback(nullptr);
+        if (currentMenu == MENU_BT_SCAN) {
+            buildBTScanMenu();
+            displayNeedsUpdate = true;
+        }
+    }
+}
+
+// ============================================================================
 // BLUETOOTH CALLBACKS
 // ============================================================================
 
 void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
     Serial.printf("[BT] Connection state changed: ");
-    
+
     switch (state) {
         case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
             Serial.println("DISCONNECTED");
             bluetoothConnected = false;
-            
+
             // Stop playback and clear buffer on disconnect
             if (player_state != STATE_STOPPED) {
                 Serial.println("[PLAYER] Stopping due to disconnect");
@@ -78,19 +112,17 @@ void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
                 delay(10);
             }
             break;
-            
+
         case ESP_A2D_CONNECTION_STATE_CONNECTING:
             Serial.println("CONNECTING...");
             break;
-            
+
         case ESP_A2D_CONNECTION_STATE_CONNECTED:
             Serial.println("CONNECTED");
             bluetoothConnected = true;
-            
-            // Save device name for reconnection
-            // Note: get_peer_name() may not exist in all versions
-            // We'll use the name we connected to instead
-            last_device_name = headphoneName;
+
+            // Save connected device name to NVS for persistence across reboots
+            rougePrefs.saveBTDevice(last_device_name.c_str());
             Serial.printf("[BT] Connected to: %s\n", last_device_name.c_str());
             break;
             
@@ -254,19 +286,41 @@ void disconnectBluetooth() {
 
 void changeBluetoothDevice(const String& new_device_name) {
     Serial.printf("[BT] Changing device to: %s\n", new_device_name.c_str());
-    
+
     // Disconnect if connected
     if (bluetoothConnected) {
         disconnectBluetooth();
         delay(1000);  // Wait for clean disconnect
     }
-    
-    // Update device name
+
+    // Update device name and connect
     last_device_name = new_device_name;
-    
-    // Start connection to new device
     a2dp.start(last_device_name.c_str());
     Serial.println("[BT] Connecting to new device...");
+}
+
+void startBTScan() {
+    if (btScanning) return;
+
+    // Stop playback if active
+    if (player_state != STATE_STOPPED) stopPlayback();
+
+    // Disconnect if connected
+    if (bluetoothConnected) {
+        disconnectBluetooth();
+        delay(500);
+    }
+
+    btFoundDevices.clear();
+    btScanning = true;
+
+    // Set callbacks: collect all found devices, never auto-connect
+    a2dp.set_ssid_callback(btScanCallback);
+    a2dp.set_discovery_mode_callback(btDiscoveryModeCallback);
+
+    // start() with empty name list = scan all BT devices in range
+    a2dp.start();
+    Serial.println("[BT Scan] Scanning for nearby devices...");
 }
 
 void initAudio()
@@ -296,8 +350,12 @@ void initAudio()
 
     a2dp.set_auto_reconnect(false);
     Serial.println("[BT] Auto-reconnect: DISABLED");
-    
-    a2dp.start(headphoneName);
+
+    // Load saved device name from NVS; fall back to hardcoded default
+    String savedDevice = rougePrefs.loadBTDevice();
+    last_device_name = savedDevice.isEmpty() ? String(headphoneName) : savedDevice;
+    Serial.printf("[BT] Connecting to: %s\n", last_device_name.c_str());
+    a2dp.start(last_device_name.c_str());
     Serial.println("✅ A2DP Started!");
     bluetoothConnected = false;
     btStatus = "BT Disconnected";
