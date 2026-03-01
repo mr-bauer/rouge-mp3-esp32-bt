@@ -178,6 +178,7 @@ void updateEncoder()
           if (currentVolume > 100) currentVolume = 100;
           
           player.setVolume(currentVolume / 100.0f);
+          setM4AVolume(currentVolume / 100.0f);
           lastVolumeChange = millis();
           displayNeedsUpdate = true;
           
@@ -338,6 +339,7 @@ void updateEncoder()
         Serial.println("🔊 Exiting volume control mode");
         volumeControlActive = false;
         volumeModeTicks = 0;
+        forceDisplayRedraw = true;
         displayNeedsUpdate = true;
       }
     }

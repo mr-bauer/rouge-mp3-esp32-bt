@@ -6,13 +6,14 @@
 
 | Feature | Details |
 |---|---|
-| MP3 playback | arduino-audio-tools + Helix decoder; streams from SD card |
+| MP3 playback | arduino-audio-tools + Helix MP3 decoder; streams from SD card |
+| M4A (AAC) playback | Helix AAC decoder with VolumeStream; M4A box layout metadata pre-stored in `music.db` so playback begins instantly (no runtime file scan) |
 | Bluetooth A2DP source | Connects to wireless speakers/headphones as an audio source |
 | 128KB PSRAM audio buffer | Ring buffer in PSRAM feeds the BT stack; keeps playback smooth |
 | Auto-advance (next track) | Walks forward through songs → albums → artists automatically |
 | Auto-previous (prev track) | Walks backward through songs → albums → artists |
 | Play / Pause / Resume / Stop | Full playback state machine with clean buffer resets |
-| Volume control | Encoder-activated from Now Playing; saved to NVS with 3s debounce |
+| Volume control | Encoder-activated from Now Playing; applies to both MP3 and M4A; saved to NVS with 3s debounce |
 | Auto-fade between tracks | Enabled via arduino-audio-tools `setAutoFade(true)` |
 | Bluetooth reconnect / disconnect | Manual reconnect and disconnect from the Bluetooth menu |
 
@@ -20,7 +21,7 @@
 
 | Feature | Details |
 |---|---|
-| Desktop indexer tool | Scans SD card MP3s and writes a SQLite `music.db` with artist/album/song/track metadata |
+| Desktop indexer tool | Scans SD card MP3 and M4A files and writes a SQLite `music.db` with artist/album/song/track metadata; for M4A files also parses the MP4 box structure and stores 7 AAC layout fields (`mdat_start`, `stsz_offset`, `sample_count`, `fixed_size`, `aac_profile`, `aac_sr_idx`, `aac_ch_cfg`) for zero-scan fast startup |
 | SQLite music database | `music.db` on SD card, queried on-device via Sqlite3Esp32 |
 | Artist browser | Sorted artist list loaded from DB |
 | Album browser (per artist) | Albums for the selected artist, sorted |
@@ -87,7 +88,7 @@ None currently.
 
 ### Audio & Playback
 
-- [ ] **Additional audio formats** — currently only `.mp3` is supported (hardcoded `ext = "mp3"` in `AudioManager.cpp`); candidates are FLAC, AAC, OGG Vorbis, and WAV — each requires a matching arduino-audio-tools codec and potentially more PSRAM buffer headroom
+- [ ] **Additional audio formats** — MP3 and M4A/AAC are supported; candidates for future formats are FLAC, OGG Vorbis, and WAV — each requires a matching arduino-audio-tools codec and potentially more PSRAM buffer headroom
 - [ ] **Sleep timer** — auto-pause/stop playback after N minutes; configurable from Settings
 
 ### Bluetooth

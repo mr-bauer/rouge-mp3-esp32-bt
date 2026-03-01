@@ -209,50 +209,78 @@ std::vector<std::string> MusicDatabase::getAlbumNamesByArtist(const std::string&
 
 std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, const std::string& albumName) {
     std::vector<Song> result;
-    
+
     if (!isOpen || artistName.empty() || albumName.empty()) return result;
-    
-    const char* sql = 
-        "SELECT songs.title, songs.path, songs.track_number, songs.duration "
-        "FROM songs "
-        "JOIN albums ON songs.album_id = albums.id "
-        "JOIN artists ON albums.artist_id = artists.id "
-        "WHERE artists.name LIKE ? AND albums.name LIKE ? "
-        "ORDER BY songs.track_number";
-    
-    sqlite3_stmt* stmt;
-    
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, artistName.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, albumName.c_str(), -1, SQLITE_TRANSIENT);
 
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            Song song;
-            const char* title = (const char*)sqlite3_column_text(stmt, 0);
-            const char* path = (const char*)sqlite3_column_text(stmt, 1);
+    // Try extended query first (DB has M4A layout metadata columns)
+    const char* sql_ext =
+        "SELECT songs.title, songs.path, songs.track_number, songs.duration,"
+        " songs.mdat_start, songs.stsz_offset, songs.sample_count, songs.fixed_size,"
+        " songs.aac_profile, songs.aac_sr_idx, songs.aac_ch_cfg"
+        " FROM songs"
+        " JOIN albums  ON songs.album_id    = albums.id"
+        " JOIN artists ON albums.artist_id  = artists.id"
+        " WHERE artists.name LIKE ? AND albums.name LIKE ?"
+        " ORDER BY songs.track_number";
 
-            if (title) {
-                song.title = title;
-                song.displayTitle = title;  // Full title; display layer truncates as needed
-            }
+    // Fallback for older databases without M4A columns
+    const char* sql_basic =
+        "SELECT songs.title, songs.path, songs.track_number, songs.duration"
+        " FROM songs"
+        " JOIN albums  ON songs.album_id    = albums.id"
+        " JOIN artists ON albums.artist_id  = artists.id"
+        " WHERE artists.name LIKE ? AND albums.name LIKE ?"
+        " ORDER BY songs.track_number";
 
-            if (path) {
-                song.path = path;
-            }
+    sqlite3_stmt* stmt = nullptr;
+    bool extended = false;
 
-            song.track = sqlite3_column_int(stmt, 2);
-            song.duration = sqlite3_column_int(stmt, 3);
-
-            result.push_back(song);
-        }
+    if (sqlite3_prepare_v2(db, sql_ext, -1, &stmt, nullptr) == SQLITE_OK) {
+        extended = true;
+    } else if (sqlite3_prepare_v2(db, sql_basic, -1, &stmt, nullptr) == SQLITE_OK) {
+        extended = false;
     } else {
         Serial.printf("❌ SQL error: %s\n", sqlite3_errmsg(db));
+        return result;
     }
-    
+
+    sqlite3_bind_text(stmt, 1, artistName.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, albumName.c_str(), -1, SQLITE_TRANSIENT);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        Song song;
+        const char* title = (const char*)sqlite3_column_text(stmt, 0);
+        const char* path  = (const char*)sqlite3_column_text(stmt, 1);
+
+        if (title) {
+            song.title        = title;
+            song.displayTitle = title;  // Full title; display layer truncates as needed
+        }
+        if (path) {
+            song.path = path;
+        }
+
+        song.track    = sqlite3_column_int(stmt, 2);
+        song.duration = sqlite3_column_int(stmt, 3);
+
+        if (extended) {
+            song.mdatStart   = (uint64_t)sqlite3_column_int64(stmt, 4);
+            song.stszOffset  = (uint64_t)sqlite3_column_int64(stmt, 5);
+            song.sampleCount = (uint32_t)sqlite3_column_int(stmt,  6);
+            song.fixedSize   = (uint32_t)sqlite3_column_int(stmt,  7);
+            song.aacProfile  = sqlite3_column_int(stmt, 8);
+            song.aacSrIdx    = sqlite3_column_int(stmt, 9);
+            song.aacChCfg    = sqlite3_column_int(stmt, 10);
+        }
+
+        result.push_back(song);
+    }
+
     sqlite3_finalize(stmt);
-    
-    Serial.printf("📊 Loaded %d songs from %s - %s\n", 
-                  result.size(), artistName.c_str(), albumName.c_str());
+
+    Serial.printf("📊 Loaded %d songs from %s - %s%s\n",
+                  result.size(), artistName.c_str(), albumName.c_str(),
+                  extended ? " (with M4A meta)" : "");
     return result;
 }
 

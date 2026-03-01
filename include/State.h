@@ -97,11 +97,20 @@ extern std::string currentTitle;
 struct Song
 {
   std::string title;         // Full title (for Now Playing)
-  std::string displayTitle;  // Truncated title (for list display) - NEW
+  std::string displayTitle;  // Truncated title (for list display)
   std::string path;
   int track;
   int duration;
-  
+
+  // M4A playback metadata (from DB — avoids file pre-scan at playback time)
+  uint64_t mdatStart   = 0;  // byte offset where audio data begins (after mdat header)
+  uint64_t stszOffset  = 0;  // byte offset of stsz box
+  uint32_t sampleCount = 0;  // total number of audio samples
+  uint32_t fixedSize   = 0;  // fixed sample size (0 = variable)
+  int      aacProfile  = 2;  // AAC audio object type (2 = LC)
+  int      aacSrIdx    = 4;  // sample rate index (4 = 44100 Hz)
+  int      aacChCfg    = 2;  // channel config (2 = stereo)
+
   Song() : track(0), duration(0) {}
 };
 
