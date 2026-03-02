@@ -83,7 +83,7 @@ def sanitize_text(text):
 # M4A BOX PARSER — extracts layout metadata for fast ESP32 playback
 # ============================================================================
 
-_M4A_CONTAINER_BOXES = {b'moov', b'trak', b'mdia', b'minf', b'stbl', b'udta'}
+_M4A_CONTAINER_BOXES = {b'moov', b'trak', b'mdia', b'minf', b'stbl', b'udta', b'ilst', b'covr'}
 _M4A_AUDIO_ENTRY_BOXES = {b'mp4a', b'alac'}
 
 
@@ -139,6 +139,22 @@ def _parse_m4a_boxes_recursive(f, end_pos, result):
         elif box_type == b'esds':
             f.seek(data_start)
             _parse_esds(f, result)
+
+        elif box_type == b'meta':
+            # meta is a "full box": 4 extra bytes (version + flags) before child boxes
+            f.seek(data_start + 4)
+            _parse_m4a_boxes_recursive(f, box_end, result)
+
+        elif box_type == b'data':
+            # Cover art data box inside moov/udta/meta/ilst/covr
+            # Format: [4B type indicator][4B locale][raw image bytes]
+            if size >= 16:
+                f.seek(data_start)
+                type_indicator = struct.unpack('>I', f.read(4))[0]
+                f.read(4)  # skip locale
+                if type_indicator == 0x0000000D and result['covr_offset'] == 0:  # JPEG only
+                    result['covr_offset'] = f.tell()   # first byte of JPEG data
+                    result['covr_size']   = size - 16  # box size minus 8B header + 4B type + 4B locale
 
         elif box_type in _M4A_CONTAINER_BOXES:
             f.seek(data_start)
@@ -207,10 +223,13 @@ def _parse_esds(f, result):
 
 def parse_m4a_boxes(file_path):
     """
-    Parse M4A/MP4 box structure to extract layout metadata for fast ESP32 playback.
+    Parse M4A/MP4 box structure to extract layout metadata for fast ESP32 playback
+    and cover art location for Now Playing display.
 
     Returns a dict with: mdat_start, stsz_offset, sample_count, fixed_size,
-    aac_profile, aac_sr_idx, aac_ch_cfg. Returns None if required data is missing.
+    aac_profile, aac_sr_idx, aac_ch_cfg, covr_offset, covr_size.
+    Returns None if required playback data (mdat/stsz/sample_count) is missing.
+    covr_offset/covr_size are 0 if no JPEG cover art was found (non-fatal).
     """
     result = {
         'mdat_start':   0,
@@ -220,6 +239,8 @@ def parse_m4a_boxes(file_path):
         'aac_profile':  2,   # AAC-LC default
         'aac_sr_idx':   4,   # 44100 Hz default
         'aac_ch_cfg':   2,   # stereo default
+        'covr_offset':  0,   # byte offset of JPEG cover art data in file (0 = none)
+        'covr_size':    0,   # byte count of JPEG cover art data
     }
     try:
         file_size = os.path.getsize(file_path)
@@ -280,6 +301,8 @@ def create_database(db_path):
             aac_profile  INTEGER DEFAULT 2,
             aac_sr_idx   INTEGER DEFAULT 4,
             aac_ch_cfg   INTEGER DEFAULT 2,
+            covr_offset  INTEGER DEFAULT 0,
+            covr_size    INTEGER DEFAULT 0,
             FOREIGN KEY (album_id) REFERENCES albums(id)
         )
     ''')
@@ -384,6 +407,7 @@ def extract_metadata_tags(file_path):
             'track_number': track,
             'year':         year,
             'duration':     dur,
+            'sample_rate':  audio.info.sample_rate,
             'file_size':    os.path.getsize(file_path),
         }
 
@@ -476,6 +500,7 @@ def extract_metadata_folder(file_path, music_folder):
         'track_number': track,
         'year':         year,
         'duration':     dur,
+        'sample_rate':  audio.info.sample_rate if dur > 0 else 44100,
         'file_size':    os.path.getsize(file_path),
     }
 
@@ -499,8 +524,8 @@ def scan_music_folder(music_folder, db_path, source='id3', verbose=False):
     cursor = conn.cursor()
 
     song_count = mp3_count = m4a_count = 0
-    m4a_meta_count = m4a_meta_missing = 0
-    error_count = skipped_count = mac_skipped = other_skipped = 0
+    m4a_meta_count = m4a_meta_missing = m4a_art_count = 0
+    error_count = skipped_count = mac_skipped = other_skipped = sr_warning_count = 0
 
     # Collect all supported audio files
     audio_files = []
@@ -545,21 +570,33 @@ def scan_music_folder(music_folder, db_path, source='id3', verbose=False):
             error_count += 1
             continue
 
+        # Warn about non-44.1kHz files — A2DP is fixed at 44100Hz, so these will sound sped up
+        sr = metadata.get('sample_rate', 44100)
+        if sr != 44100:
+            print(f"   ⚠️  Non-standard sample rate ({sr} Hz, expected 44100): {relative_path}")
+            print(f"       Fix: ffmpeg -i \"{file_path}\" -ar 44100 \"{file_path}\"")
+            sr_warning_count += 1
+
         # Parse M4A box layout for fast ESP32 startup (no file scanning at runtime)
         m4a_meta = None
         if ext == '.m4a':
             m4a_meta = parse_m4a_boxes(file_path)
             if m4a_meta:
                 m4a_meta_count += 1
+                if m4a_meta['covr_offset'] > 0:
+                    m4a_art_count += 1
                 if verbose:
                     sr_table = {0:96000,1:88200,2:64000,3:48000,4:44100,5:32000,
                                 6:24000,7:22050,8:16000,9:12000,10:11025,11:8000}
                     sr_hz = sr_table.get(m4a_meta['aac_sr_idx'], '?')
+                    covr_info = (f"  covr@{m4a_meta['covr_offset']} ({m4a_meta['covr_size']}B JPEG)"
+                                 if m4a_meta['covr_offset'] > 0 else "  no cover art")
                     print(f"   🎵 M4A meta: mdat@{m4a_meta['mdat_start']}, "
                           f"stsz@{m4a_meta['stsz_offset']}, "
                           f"{m4a_meta['sample_count']} samples, "
                           f"profile={m4a_meta['aac_profile']} "
-                          f"sr={sr_hz}Hz ch={m4a_meta['aac_ch_cfg']}")
+                          f"sr={sr_hz}Hz ch={m4a_meta['aac_ch_cfg']}"
+                          f"{covr_info}")
             else:
                 m4a_meta_missing += 1
                 print(f"   ⚠️  M4A layout parse failed (will fall back to runtime scan): {relative_path}")
@@ -572,13 +609,15 @@ def scan_music_folder(music_folder, db_path, source='id3', verbose=False):
                 cursor.execute('''
                     INSERT INTO songs (album_id, title, path, track_number, duration, file_size,
                                       mdat_start, stsz_offset, sample_count, fixed_size,
-                                      aac_profile, aac_sr_idx, aac_ch_cfg)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      aac_profile, aac_sr_idx, aac_ch_cfg,
+                                      covr_offset, covr_size)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (album_id, metadata['title'], esp32_path,
                       metadata['track_number'], metadata['duration'], metadata['file_size'],
                       m4a_meta['mdat_start'], m4a_meta['stsz_offset'],
                       m4a_meta['sample_count'], m4a_meta['fixed_size'],
-                      m4a_meta['aac_profile'], m4a_meta['aac_sr_idx'], m4a_meta['aac_ch_cfg']))
+                      m4a_meta['aac_profile'], m4a_meta['aac_sr_idx'], m4a_meta['aac_ch_cfg'],
+                      m4a_meta['covr_offset'], m4a_meta['covr_size']))
             else:
                 cursor.execute('''
                     INSERT INTO songs (album_id, title, path, track_number, duration, file_size)
@@ -625,8 +664,12 @@ def scan_music_folder(music_folder, db_path, source='id3', verbose=False):
         print(f"   M4A:      {m4a_count}")
         if m4a_meta_count:
             print(f"   M4A meta: {m4a_meta_count}/{m4a_count} files parsed ✅ (fast startup)")
+        if m4a_art_count:
+            print(f"   M4A art:  {m4a_art_count}/{m4a_meta_count} files have JPEG cover art 🖼️")
         if m4a_meta_missing:
             print(f"   M4A meta: {m4a_meta_missing} files missing layout data ⚠️  (runtime scan fallback)")
+    if sr_warning_count:
+        print(f"   ⚠️  Non-44.1kHz: {sr_warning_count} file(s) — will sound sped up on device")
     if error_count:
         print(f"   Errors:   {error_count}")
     if skipped_count:

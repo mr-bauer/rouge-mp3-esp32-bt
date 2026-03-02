@@ -111,6 +111,10 @@ struct Song
   int      aacSrIdx    = 4;  // sample rate index (4 = 44100 Hz)
   int      aacChCfg    = 2;  // channel config (2 = stereo)
 
+  // M4A cover art location (populated by indexer for files with JPEG embedded art)
+  uint64_t covrOffset  = 0;  // byte offset of JPEG data in .m4a file (0 = no art)
+  uint32_t covrSize    = 0;  // byte count of JPEG data
+
   Song() : track(0), duration(0) {}
 };
 

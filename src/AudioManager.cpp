@@ -733,8 +733,8 @@ void playCurrentSong(bool updateDisplay)
     totalPausedMs       = 0;
     pauseStartMillis    = 0;
 
-    // Load album art from ID3 tags using audio source's SdFat32 instance
-    loadAlbumArt(source.getAudioFs(), song.path.c_str());
+    // Load album art: M4A uses pre-indexed offset/size for instant seek; MP3 scans ID3 tags
+    loadAlbumArt(source.getAudioFs(), song.path.c_str(), song.covrOffset, song.covrSize);
 
     Serial.println("   Opening file...");
 

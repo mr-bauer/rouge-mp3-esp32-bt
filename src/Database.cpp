@@ -212,7 +212,19 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
 
     if (!isOpen || artistName.empty() || albumName.empty()) return result;
 
-    // Try extended query first (DB has M4A layout metadata columns)
+    // Try full query first (DB has M4A layout + cover art columns)
+    const char* sql_full =
+        "SELECT songs.title, songs.path, songs.track_number, songs.duration,"
+        " songs.mdat_start, songs.stsz_offset, songs.sample_count, songs.fixed_size,"
+        " songs.aac_profile, songs.aac_sr_idx, songs.aac_ch_cfg,"
+        " songs.covr_offset, songs.covr_size"
+        " FROM songs"
+        " JOIN albums  ON songs.album_id    = albums.id"
+        " JOIN artists ON albums.artist_id  = artists.id"
+        " WHERE artists.name LIKE ? AND albums.name LIKE ?"
+        " ORDER BY songs.track_number";
+
+    // Fallback for databases with M4A playback columns but without cover art columns
     const char* sql_ext =
         "SELECT songs.title, songs.path, songs.track_number, songs.duration,"
         " songs.mdat_start, songs.stsz_offset, songs.sample_count, songs.fixed_size,"
@@ -223,7 +235,7 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
         " WHERE artists.name LIKE ? AND albums.name LIKE ?"
         " ORDER BY songs.track_number";
 
-    // Fallback for older databases without M4A columns
+    // Fallback for older databases without any M4A columns
     const char* sql_basic =
         "SELECT songs.title, songs.path, songs.track_number, songs.duration"
         " FROM songs"
@@ -233,12 +245,14 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
         " ORDER BY songs.track_number";
 
     sqlite3_stmt* stmt = nullptr;
-    bool extended = false;
+    int queryLevel = 0;  // 2 = full (covr), 1 = extended (M4A layout only), 0 = basic
 
-    if (sqlite3_prepare_v2(db, sql_ext, -1, &stmt, nullptr) == SQLITE_OK) {
-        extended = true;
+    if (sqlite3_prepare_v2(db, sql_full, -1, &stmt, nullptr) == SQLITE_OK) {
+        queryLevel = 2;
+    } else if (sqlite3_prepare_v2(db, sql_ext, -1, &stmt, nullptr) == SQLITE_OK) {
+        queryLevel = 1;
     } else if (sqlite3_prepare_v2(db, sql_basic, -1, &stmt, nullptr) == SQLITE_OK) {
-        extended = false;
+        queryLevel = 0;
     } else {
         Serial.printf("❌ SQL error: %s\n", sqlite3_errmsg(db));
         return result;
@@ -263,7 +277,7 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
         song.track    = sqlite3_column_int(stmt, 2);
         song.duration = sqlite3_column_int(stmt, 3);
 
-        if (extended) {
+        if (queryLevel >= 1) {
             song.mdatStart   = (uint64_t)sqlite3_column_int64(stmt, 4);
             song.stszOffset  = (uint64_t)sqlite3_column_int64(stmt, 5);
             song.sampleCount = (uint32_t)sqlite3_column_int(stmt,  6);
@@ -273,14 +287,21 @@ std::vector<Song> MusicDatabase::getSongsByAlbum(const std::string& artistName, 
             song.aacChCfg    = sqlite3_column_int(stmt, 10);
         }
 
+        if (queryLevel >= 2) {
+            song.covrOffset  = (uint64_t)sqlite3_column_int64(stmt, 11);
+            song.covrSize    = (uint32_t)sqlite3_column_int(stmt,  12);
+        }
+
         result.push_back(song);
     }
 
     sqlite3_finalize(stmt);
 
+    const char* levelStr = (queryLevel == 2) ? " (M4A meta + cover art)"
+                         : (queryLevel == 1) ? " (M4A meta)"
+                         : "";
     Serial.printf("📊 Loaded %d songs from %s - %s%s\n",
-                  result.size(), artistName.c_str(), albumName.c_str(),
-                  extended ? " (with M4A meta)" : "");
+                  result.size(), artistName.c_str(), albumName.c_str(), levelStr);
     return result;
 }
 
