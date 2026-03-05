@@ -6,6 +6,14 @@
 #include "Haptics.h"
 #include "Preferences.h"
 
+static void savePlayingContext() {
+  playingSongIndex   = songIndex;
+  playingAlbumIndex  = albumIndex;
+  playingArtistIndex = artistIndex;
+  playingArtist      = currentArtist;
+  playingAlbum       = currentAlbum;
+}
+
 void handleButtonPress(int buttonIndex)
 {
   switch (buttonIndex)
@@ -201,11 +209,7 @@ void handleCenter()
         }
 
         // Save playing context so autoNext/autoPrevious advance from this position
-        playingSongIndex = songIndex;
-        playingAlbumIndex = albumIndex;
-        playingArtistIndex = artistIndex;
-        playingArtist = currentArtist;
-        playingAlbum = currentAlbum;
+        savePlayingContext();
 
         Serial.println("Starting new song");
         playCurrentSong(false);
@@ -256,11 +260,7 @@ void handleBottom()
     // If stopped and we have songs, start playing
     if (!songs.empty()) {
       // Save playing context so autoNext advances from this position
-      playingSongIndex = songIndex;
-      playingAlbumIndex = albumIndex;
-      playingArtistIndex = artistIndex;
-      playingArtist = currentArtist;
-      playingAlbum = currentAlbum;
+      savePlayingContext();
       startPlayback();
       hapticSelection();
       navigateToMenu(MENU_NOW_PLAYING);
@@ -324,260 +324,142 @@ void handleBottomLongPress()
   displayNeedsUpdate = true;
 }
 
-void autoPrevious()
+static void navigateInDirection(int dir)
 {
-  Serial.println("Going to previous track...");
+  const bool goForward = (dir > 0);
+  const char* label = goForward ? "next" : "previous";
 
-  // Restore to playing context if the user has browsed to a different artist/album
+  // Restore playing context if the user has browsed to a different artist/album
   if (playingArtist != currentArtist || playingAlbum != currentAlbum) {
-    Serial.println("📀 Restoring playing context before auto-previous");
-    artistIndex = playingArtistIndex;
+    Serial.printf("📀 Restoring playing context before auto-%s\n", label);
+    artistIndex   = playingArtistIndex;
     currentArtist = playingArtist;
     buildAlbumList(currentArtist);
-    albumIndex = playingAlbumIndex;
-    currentAlbum = playingAlbum;
+    albumIndex    = playingAlbumIndex;
+    currentAlbum  = playingAlbum;
     buildSongList(currentArtist, currentAlbum);
   }
   songIndex = playingSongIndex;
 
-  // Try previous song in current album
-  if (songIndex - 1 >= 0)
+  // Try next/previous song in current album
+  int nextSong = songIndex + dir;
+  if (nextSong >= 0 && nextSong < (int)songs.size())
   {
-    songIndex--;
+    songIndex        = nextSong;
     playingSongIndex = songIndex;
     playCurrentSong(true);
     displayNeedsUpdate = true;
-    logRamSpace("auto previous - same album");
+    logRamSpace(goForward ? "auto next - same album" : "auto previous - same album");
     return;
   }
 
-  // Try previous album
-  if (albumIndex - 1 >= 0)
+  // Try next/previous album
+  int nextAlbum = albumIndex + dir;
+  if (nextAlbum >= 0 && nextAlbum < (int)albums.size())
   {
-    albumIndex--;
-
+    albumIndex   = nextAlbum;
+    if (goForward) songIndex = 0;
     currentAlbum = albums[albumIndex];
 
     if (buildSongList(currentArtist, currentAlbum))
     {
       if (!songs.empty())
       {
-        songIndex = songs.size() - 1;  // Go to last song of previous album
-        playingSongIndex = songIndex;
+        songIndex         = goForward ? 0 : (int)songs.size() - 1;
+        playingSongIndex  = songIndex;
         playingAlbumIndex = albumIndex;
-        playingAlbum = currentAlbum;
+        playingAlbum      = currentAlbum;
         playCurrentSong(true);
         displayNeedsUpdate = true;
-        logRamSpace("auto previous - previous album");
+        logRamSpace(goForward ? "auto next - next album" : "auto previous - previous album");
         return;
       }
       else
       {
-        Serial.println("⚠️ Album has no songs, trying previous");
-        playingSongIndex = songIndex;
+        Serial.printf("⚠️ Album has no songs, trying %s\n", label);
+        playingSongIndex  = songIndex;
         playingAlbumIndex = albumIndex;
-        playingAlbum = currentAlbum;
-        autoPrevious();
+        playingAlbum      = currentAlbum;
+        navigateInDirection(dir);
         return;
       }
     }
     else
     {
       Serial.println("⚠️ Failed to load album songs");
-      playingSongIndex = songIndex;
+      playingSongIndex  = songIndex;
       playingAlbumIndex = albumIndex;
-      playingAlbum = currentAlbum;
-      autoPrevious();
+      playingAlbum      = currentAlbum;
+      navigateInDirection(dir);
       return;
     }
   }
 
-  // Try previous artist
-  if (artistIndex - 1 >= 0)
+  // Try next/previous artist
+  int nextArtist = artistIndex + dir;
+  if (nextArtist >= 0 && nextArtist < (int)artists.size())
   {
-    artistIndex--;
-
+    artistIndex   = nextArtist;
+    if (goForward) { albumIndex = 0; songIndex = 0; }
     currentArtist = artists[artistIndex];
 
     if (buildAlbumList(currentArtist))
     {
       if (!albums.empty())
       {
-        albumIndex = albums.size() - 1;  // Go to last album of previous artist
+        if (!goForward) albumIndex = (int)albums.size() - 1;
         currentAlbum = albums[albumIndex];
 
         if (buildSongList(currentArtist, currentAlbum))
         {
           if (!songs.empty())
           {
-            songIndex = songs.size() - 1;  // Go to last song
-            playingSongIndex = songIndex;
-            playingAlbumIndex = albumIndex;
-            playingArtistIndex = artistIndex;
-            playingArtist = currentArtist;
-            playingAlbum = currentAlbum;
+            songIndex = goForward ? 0 : (int)songs.size() - 1;
+            savePlayingContext();
             playCurrentSong(true);
             displayNeedsUpdate = true;
-            logRamSpace("auto previous - previous artist");
+            logRamSpace(goForward ? "auto next - next artist" : "auto previous - previous artist");
             return;
           }
           else
           {
             Serial.println("⚠️ No songs found");
-            playingSongIndex = songIndex;
-            playingAlbumIndex = albumIndex;
-            playingArtistIndex = artistIndex;
-            playingArtist = currentArtist;
-            playingAlbum = currentAlbum;
-            autoPrevious();
+            savePlayingContext();
+            navigateInDirection(dir);
             return;
           }
         }
+        // buildSongList failed — fall through to boundary
       }
       else
       {
         Serial.println("⚠️ Artist has no albums");
         playingArtistIndex = artistIndex;
-        playingArtist = currentArtist;
-        autoPrevious();
+        playingArtist      = currentArtist;
+        navigateInDirection(dir);
         return;
       }
     }
   }
 
-  // Already at beginning of library
-  Serial.println("📀 At beginning of library");
-  // Restart current song
-  playCurrentSong(true);
-  displayNeedsUpdate = true;
-  logRamSpace("auto previous - restart");
-}
-
-void autoNext()
-{
-  Serial.println("Auto-advancing to next track...");
-
-  // Restore to playing context if the user has browsed to a different artist/album
-  if (playingArtist != currentArtist || playingAlbum != currentAlbum) {
-    Serial.println("📀 Restoring playing context before auto-advance");
-    artistIndex = playingArtistIndex;
-    currentArtist = playingArtist;
-    buildAlbumList(currentArtist);
-    albumIndex = playingAlbumIndex;
-    currentAlbum = playingAlbum;
-    buildSongList(currentArtist, currentAlbum);
-  }
-  songIndex = playingSongIndex;
-
-  // Try next song in current album
-  if (songIndex + 1 < (int)songs.size())
+  // Boundary of library
+  if (goForward)
   {
-    songIndex++;
-    playingSongIndex = songIndex;
+    Serial.println("📀 Reached end of library");
+    stopPlayback();
+    navigateToMenu(MENU_NOW_PLAYING);
+    displayNeedsUpdate = true;
+    logRamSpace("auto next - end");
+  }
+  else
+  {
+    Serial.println("📀 At beginning of library");
     playCurrentSong(true);
     displayNeedsUpdate = true;
-    logRamSpace("auto next - same album");
-    return;
+    logRamSpace("auto previous - restart");
   }
-
-  // Try next album
-  if (albumIndex + 1 < (int)albums.size())
-  {
-    albumIndex++;
-    songIndex = 0;
-
-    currentAlbum = albums[albumIndex];
-
-    if (buildSongList(currentArtist, currentAlbum))
-    {
-      if (!songs.empty())
-      {
-        playingSongIndex = songIndex;
-        playingAlbumIndex = albumIndex;
-        playingAlbum = currentAlbum;
-        playCurrentSong(true);
-        displayNeedsUpdate = true;
-        logRamSpace("auto next - next album");
-        return;
-      }
-      else
-      {
-        Serial.println("⚠️ Album has no songs, trying next");
-        playingSongIndex = songIndex;
-        playingAlbumIndex = albumIndex;
-        playingAlbum = currentAlbum;
-        autoNext();
-        return;
-      }
-    }
-    else
-    {
-      Serial.println("⚠️ Failed to load album songs");
-      playingSongIndex = songIndex;
-      playingAlbumIndex = albumIndex;
-      playingAlbum = currentAlbum;
-      autoNext();
-      return;
-    }
-  }
-
-  // Try next artist
-  if (artistIndex + 1 < (int)artists.size())
-  {
-    artistIndex++;
-    albumIndex = 0;
-    songIndex = 0;
-
-    currentArtist = artists[artistIndex];
-
-    if (buildAlbumList(currentArtist))
-    {
-      if (!albums.empty())
-      {
-        currentAlbum = albums[0];
-
-        if (buildSongList(currentArtist, currentAlbum))
-        {
-          if (!songs.empty())
-          {
-            playingSongIndex = songIndex;
-            playingAlbumIndex = albumIndex;
-            playingArtistIndex = artistIndex;
-            playingArtist = currentArtist;
-            playingAlbum = currentAlbum;
-            playCurrentSong(true);
-            displayNeedsUpdate = true;
-            logRamSpace("auto next - next artist");
-            return;
-          }
-          else
-          {
-            Serial.println("⚠️ No songs found");
-            playingSongIndex = songIndex;
-            playingAlbumIndex = albumIndex;
-            playingArtistIndex = artistIndex;
-            playingArtist = currentArtist;
-            playingAlbum = currentAlbum;
-            autoNext();
-            return;
-          }
-        }
-      }
-      else
-      {
-        Serial.println("⚠️ Artist has no albums");
-        playingArtistIndex = artistIndex;
-        playingArtist = currentArtist;
-        autoNext();
-        return;
-      }
-    }
-  }
-
-  // End of library
-  Serial.println("📀 Reached end of library");
-  stopPlayback();
-  navigateToMenu(MENU_NOW_PLAYING);
-  displayNeedsUpdate = true;
-  logRamSpace("auto next - end");
 }
+
+void autoPrevious() { navigateInDirection(-1); }
+
+void autoNext()     { navigateInDirection(+1); }

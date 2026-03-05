@@ -131,7 +131,6 @@ void drawControlBar(int centerY, const char* label, int value, int maxValue,
                    const char* unit);
 
 // Utility functions
-void drawUI();
 int calculateWindowStart(int currentIndex, int lastIdx, int lastWinStart,
                         int listSize, const int maxDisplay);
 

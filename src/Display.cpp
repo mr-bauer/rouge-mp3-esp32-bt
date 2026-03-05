@@ -313,32 +313,7 @@ static std::string truncateForDisplay(const char* text) {
 
 void drawMenuItem(const char* text, int y, bool selected, bool disabled)
 {
-  if (!text) return;
-
-  sprite.setTextWrap(false);
-  applyContentFont(sprite);
-
-  int textOffsetY = (textSizePreference == 1) ? y + 1 : (textSizePreference == 2) ? y + 1 : y + 6;
-  std::string displayText = truncateForDisplay(text);
-
-  if (selected) {
-    sprite.fillRoundRect(4, y - 4, SCREEN_WIDTH - 8, uiItemHeight(), 4, COLOR_SELECTED);
-    sprite.setTextColor(COLOR_BG);
-  } else if (disabled) {
-    sprite.setTextColor(COLOR_DISABLED);
-  } else {
-    sprite.setTextColor(COLOR_TEXT);
-  }
-
-  sprite.setCursor(UI_PADDING, textOffsetY);
-  sprite.print(displayText.c_str());
-
-  if (!disabled && !selected) {
-    sprite.setCursor(SCREEN_WIDTH - 20, textOffsetY);
-    sprite.print(">");
-  }
-
-  sprite.setTextColor(COLOR_TEXT);
+  drawMenuItemWithPlayback(text, y, selected, disabled, false, STATE_STOPPED);
 }
 
 void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disabled,
@@ -847,59 +822,66 @@ void updateVolumeScreen() {
   drawControlBar(90, "Volume", currentVolume, 100, "%");
 }
 
+// Progress bar constants shared between fast-path and full-redraw
+static const int NP_BAR_X = 8;
+static const int NP_BAR_Y = 196;
+static const int NP_BAR_W = SCREEN_WIDTH - 16;
+static const int NP_BAR_H = 8;
+
+// Returns elapsed playback seconds (capped at duration). Sets outDuration.
+static unsigned long calcElapsedSeconds(int& outDuration) {
+  outDuration = (songIndex >= 0 && songIndex < (int)songs.size())
+                ? songs[songIndex].duration : 0;
+  if (playbackStartMillis == 0) return 0;
+  unsigned long paused = totalPausedMs;
+  if (player_state == STATE_PAUSED && pauseStartMillis > 0)
+    paused += millis() - pauseStartMillis;
+  unsigned long rawMs = millis() - playbackStartMillis;
+  unsigned long el = (rawMs > paused) ? (rawMs - paused) / 1000 : 0;
+  if (outDuration > 0 && (int)el > outDuration) el = outDuration;
+  return el;
+}
+
+// Draws the progress bar outline and fill.
+static void drawProgressBar(unsigned long elapsed, int duration) {
+  sprite.drawRect(NP_BAR_X, NP_BAR_Y, NP_BAR_W, NP_BAR_H, COLOR_DISABLED);
+  if (duration > 0) {
+    int fillW = constrain((int)((long)elapsed * (NP_BAR_W - 4) / duration), 0, NP_BAR_W - 4);
+    if (fillW > 0)
+      sprite.fillRect(NP_BAR_X + 2, NP_BAR_Y + 2, fillW, NP_BAR_H - 4, COLOR_SELECTED);
+  }
+}
+
+// Draws elapsed / total time strings below the progress bar.
+static void drawTimeLabels(unsigned long elapsed, int duration) {
+  char elapsedStr[8], totalStr[8];
+  snprintf(elapsedStr, sizeof(elapsedStr), "%d:%02d", (int)elapsed / 60, (int)elapsed % 60);
+  if (duration > 0) snprintf(totalStr, sizeof(totalStr), "%d:%02d", duration / 60, duration % 60);
+  else              snprintf(totalStr, sizeof(totalStr), "--:--");
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_DISABLED);
+  sprite.setCursor(NP_BAR_X, NP_BAR_Y + NP_BAR_H + 4);
+  sprite.print(elapsedStr);
+  sprite.setCursor(NP_BAR_X + NP_BAR_W - sprite.textWidth(totalStr), NP_BAR_Y + NP_BAR_H + 4);
+  sprite.print(totalStr);
+  sprite.setTextColor(COLOR_TEXT);
+}
+
 void updateNowPlayingScreen() {
   // ── Fast path: 1s progress tick — only repaint the bottom strip ──────────
   // Avoids JPEG decode and full text redraw on every tick.
   if (nowPlayingProgressOnly) {
     nowPlayingProgressOnly = false;
 
-    // Compute elapsed (same as full path below)
-    unsigned long elapsed = 0;
-    if (playbackStartMillis > 0) {
-      unsigned long paused = totalPausedMs;
-      if (player_state == STATE_PAUSED && pauseStartMillis > 0)
-        paused += millis() - pauseStartMillis;
-      unsigned long rawMs = millis() - playbackStartMillis;
-      elapsed = (rawMs > paused) ? (rawMs - paused) / 1000 : 0;
-    }
-    int duration = (songIndex >= 0 && songIndex < (int)songs.size())
-                   ? songs[songIndex].duration : 0;
-    if (duration > 0 && (int)elapsed > duration) elapsed = duration;
+    int duration;
+    unsigned long elapsed = calcElapsedSeconds(duration);
 
-    const int BAR_X = 8;
-    const int BAR_Y = 196;
-    const int BAR_W = SCREEN_WIDTH - 16;
-    const int BAR_H = 8;
-    const int STRIP_Y = BAR_Y - 4;  // small margin above bar
-
-    // Clear only the bottom strip
+    const int STRIP_Y = NP_BAR_Y - 4;  // small margin above bar
     sprite.fillRect(0, STRIP_Y, SCREEN_WIDTH, SCREEN_HEIGHT - STRIP_Y, COLOR_BG);
 
-    // Bar outline + fill
-    sprite.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, COLOR_DISABLED);
-    if (duration > 0) {
-      int fillW = (int)((long)elapsed * (BAR_W - 4) / duration);
-      if (fillW > BAR_W - 4) fillW = BAR_W - 4;
-      if (fillW > 0)
-        sprite.fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, COLOR_SELECTED);
-    }
-
-    // Time labels
-    char elapsedStr[8], totalStr[8];
-    snprintf(elapsedStr, sizeof(elapsedStr), "%d:%02d",
-             (int)elapsed / 60, (int)elapsed % 60);
-    if (duration > 0)
-      snprintf(totalStr, sizeof(totalStr), "%d:%02d", duration / 60, duration % 60);
-    else
-      snprintf(totalStr, sizeof(totalStr), "--:--");
-
-    sprite.setTextSize(1);
-    sprite.setTextColor(COLOR_DISABLED);
-    sprite.setCursor(BAR_X, BAR_Y + BAR_H + 4);
-    sprite.print(elapsedStr);
-    sprite.setCursor(BAR_X + BAR_W - sprite.textWidth(totalStr), BAR_Y + BAR_H + 4);
-    sprite.print(totalStr);
-    sprite.setTextColor(COLOR_TEXT);
+    drawProgressBar(elapsed, duration);
+    drawTimeLabels(elapsed, duration);
     return;
   }
   // ── Full redraw ───────────────────────────────────────────────────────────
@@ -989,50 +971,10 @@ void updateNowPlayingScreen() {
   }
 
   // ── Progress bar + time labels (both layouts) ─────────────────────────────
-  // Compute elapsed seconds, accounting for accumulated pause time
-  unsigned long elapsed = 0;
-  if (playbackStartMillis > 0) {
-    unsigned long paused = totalPausedMs;
-    if (player_state == STATE_PAUSED && pauseStartMillis > 0)
-      paused += millis() - pauseStartMillis;
-    unsigned long rawMs = millis() - playbackStartMillis;
-    elapsed = (rawMs > paused) ? (rawMs - paused) / 1000 : 0;
-  }
-
-  int duration = (songIndex >= 0 && songIndex < (int)songs.size())
-                 ? songs[songIndex].duration : 0;
-  if (duration > 0 && (int)elapsed > duration) elapsed = duration;
-
-  const int BAR_X = 8;
-  const int BAR_Y = 196;
-  const int BAR_W = SCREEN_WIDTH - 16;  // 304px
-  const int BAR_H = 8;
-
-  sprite.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, COLOR_DISABLED);
-
-  if (duration > 0) {
-    int fillW = (int)((long)elapsed * (BAR_W - 4) / duration);
-    if (fillW > BAR_W - 4) fillW = BAR_W - 4;
-    if (fillW > 0)
-      sprite.fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, COLOR_SELECTED);
-  }
-
-  char elapsedStr[8], totalStr[8];
-  snprintf(elapsedStr, sizeof(elapsedStr), "%d:%02d",
-           (int)elapsed / 60, (int)elapsed % 60);
-  if (duration > 0)
-    snprintf(totalStr, sizeof(totalStr), "%d:%02d", duration / 60, duration % 60);
-  else
-    snprintf(totalStr, sizeof(totalStr), "--:--");
-
-  sprite.setFont(nullptr);
-  sprite.setTextSize(1);
-  sprite.setTextColor(COLOR_DISABLED);
-  sprite.setCursor(BAR_X, BAR_Y + BAR_H + 4);
-  sprite.print(elapsedStr);
-  sprite.setCursor(BAR_X + BAR_W - sprite.textWidth(totalStr), BAR_Y + BAR_H + 4);
-  sprite.print(totalStr);
-  sprite.setTextColor(COLOR_TEXT);
+  int duration;
+  unsigned long elapsed = calcElapsedSeconds(duration);
+  drawProgressBar(elapsed, duration);
+  drawTimeLabels(elapsed, duration);
 }
 
 // ============================================================================
@@ -1116,11 +1058,4 @@ void updateDisplay()
   sprite.pushSprite(0, 0);
 }
 
-void drawUI() {
-  sprite.fillSprite(COLOR_BG);
-  sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_ACCENT);
-  sprite.setTextColor(COLOR_HEADER);
-  drawCenteredText(sprite, "ROUGE MP3 PLAYER", 12, 2);
-  sprite.setTextColor(COLOR_TEXT);
-  sprite.pushSprite(0, 0);
-}
+

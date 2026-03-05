@@ -54,6 +54,50 @@ void initEncoder()
   Serial.println("✅ Encoder initialized");
 }
 
+// fast-scroll tick counter shared between artist/album blocks
+static int fastScrollTickCount = 0;
+
+// Shared fast-scroll handler for artist and album list menus.
+// Updates listIndex in-place — either advancing through the alpha index
+// (when fast-scroll is active) or plain ±1 scrolling.
+static void handleFastScrollList(volatile int& listIndex, int listSize, int step,
+                                  unsigned long tickInterval, unsigned long now)
+{
+  // Direction change → reset activation counter (but don't exit alpha mode)
+  if (consecutiveSameDirection == 1) fastScrollTickCount = 0;
+
+  // Count fast ticks for activation; once active, speed doesn't matter
+  if (!fastScrollActive) {
+    if (tickInterval < FAST_SCROLL_TICK_MS) fastScrollTickCount++;
+    else                                    fastScrollTickCount = 0;
+  }
+
+  // Activate when threshold met on a large enough list
+  if (!fastScrollActive
+      && fastScrollTickCount >= FAST_SCROLL_TRIGGER_TICKS
+      && listSize >= FAST_SCROLL_MIN_LIST
+      && !alphaIndex.empty()) {
+    fastScrollActive = true;
+    initFastScrollPosition(listIndex);
+  }
+
+  if (fastScrollActive && !alphaIndex.empty()) {
+    fastScrollLastTick = now;  // every tick resets idle timeout
+    if (now - fastScrollLastStep >= FAST_SCROLL_ALPHA_STEP_MS) {
+      fastScrollAlphaIdx = constrain(fastScrollAlphaIdx + step, 0,
+                                     (int)alphaIndex.size() - 1);
+      fastScrollLastStep = now;
+      listIndex          = alphaIndex[fastScrollAlphaIdx].firstIndex;
+      fastScrollLetter   = alphaIndex[fastScrollAlphaIdx].letter;
+      displayNeedsUpdate = true;
+    }
+  } else {
+    int old = listIndex;
+    listIndex = constrain(listIndex + step, 0, listSize - 1);
+    if (old != listIndex) displayNeedsUpdate = true;
+  }
+}
+
 // Helper function to determine the dominant scroll direction
 int getDominantDirection() {
   int sum = 0;
@@ -75,7 +119,6 @@ bool isEncoderScrolling() {
 
 void updateEncoder()
 {
-  static int fastScrollTickCount = 0;
   int newPos = encoder.getPosition();
   
   if (newPos != lastPos)
@@ -263,100 +306,11 @@ void updateEncoder()
       }
       else if (currentMenu == MENU_ARTIST_LIST && !artists.empty())
       {
-        int listSize = artists.size();
-
-        // Direction change → reset activation counter (but don't exit alpha mode)
-        if (consecutiveSameDirection == 1) {
-          fastScrollTickCount = 0;
-        }
-
-        // Count fast ticks for activation; once active, speed doesn't matter
-        if (!fastScrollActive) {
-          if (tickInterval < FAST_SCROLL_TICK_MS) fastScrollTickCount++;
-          else                                    fastScrollTickCount = 0;
-        }
-
-        // Activate when threshold met on a large enough list
-        if (!fastScrollActive
-            && fastScrollTickCount >= FAST_SCROLL_TRIGGER_TICKS
-            && listSize >= FAST_SCROLL_MIN_LIST
-            && !alphaIndex.empty()) {
-          fastScrollActive = true;
-          initFastScrollPosition(artistIndex);
-        }
-
-        if (fastScrollActive && !alphaIndex.empty()) {
-          fastScrollLastTick = now;  // every tick resets idle timeout
-          if (now - fastScrollLastStep >= FAST_SCROLL_ALPHA_STEP_MS) {
-            fastScrollAlphaIdx += step;
-            if (fastScrollAlphaIdx < 0) fastScrollAlphaIdx = 0;
-            if (fastScrollAlphaIdx >= (int)alphaIndex.size())
-              fastScrollAlphaIdx = (int)alphaIndex.size() - 1;
-            fastScrollLastStep = now;
-            artistIndex        = alphaIndex[fastScrollAlphaIdx].firstIndex;
-            fastScrollLetter   = alphaIndex[fastScrollAlphaIdx].letter;
-            displayNeedsUpdate = true;
-          }
-        } else {
-          int oldIndex = artistIndex;
-          artistIndex += step;
-          if (artistIndex < 0) artistIndex = 0;
-          else if (artistIndex >= listSize) artistIndex = listSize - 1;
-          if (oldIndex != artistIndex) {
-            displayNeedsUpdate = true;
-            #ifdef DEBUG
-            Serial.printf("Artist: %d -> %d (%s)\n",
-                         oldIndex, artistIndex, artists[artistIndex].c_str());
-            #endif
-          }
-        }
+        handleFastScrollList(artistIndex, artists.size(), step, tickInterval, now);
       }
       else if (currentMenu == MENU_ALBUM_LIST && !albums.empty())
       {
-        int listSize = albums.size();
-
-        if (consecutiveSameDirection == 1) {
-          fastScrollTickCount = 0;
-        }
-
-        if (!fastScrollActive) {
-          if (tickInterval < FAST_SCROLL_TICK_MS) fastScrollTickCount++;
-          else                                    fastScrollTickCount = 0;
-        }
-
-        if (!fastScrollActive
-            && fastScrollTickCount >= FAST_SCROLL_TRIGGER_TICKS
-            && listSize >= FAST_SCROLL_MIN_LIST
-            && !alphaIndex.empty()) {
-          fastScrollActive = true;
-          initFastScrollPosition(albumIndex);
-        }
-
-        if (fastScrollActive && !alphaIndex.empty()) {
-          fastScrollLastTick = now;  // every tick resets idle timeout
-          if (now - fastScrollLastStep >= FAST_SCROLL_ALPHA_STEP_MS) {
-            fastScrollAlphaIdx += step;
-            if (fastScrollAlphaIdx < 0) fastScrollAlphaIdx = 0;
-            if (fastScrollAlphaIdx >= (int)alphaIndex.size())
-              fastScrollAlphaIdx = (int)alphaIndex.size() - 1;
-            fastScrollLastStep = now;
-            albumIndex         = alphaIndex[fastScrollAlphaIdx].firstIndex;
-            fastScrollLetter   = alphaIndex[fastScrollAlphaIdx].letter;
-            displayNeedsUpdate = true;
-          }
-        } else {
-          int oldIndex = albumIndex;
-          albumIndex += step;
-          if (albumIndex < 0) albumIndex = 0;
-          else if (albumIndex >= listSize) albumIndex = listSize - 1;
-          if (oldIndex != albumIndex) {
-            displayNeedsUpdate = true;
-            #ifdef DEBUG
-            Serial.printf("Album: %d -> %d (%s)\n",
-                         oldIndex, albumIndex, albums[albumIndex].c_str());
-            #endif
-          }
-        }
+        handleFastScrollList(albumIndex, albums.size(), step, tickInterval, now);
       }
       else if (currentMenu == MENU_SONG_LIST && !songs.empty())
       {
