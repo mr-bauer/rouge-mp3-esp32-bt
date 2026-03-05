@@ -158,8 +158,10 @@ pio device monitor
 |---------|--------|
 | Encoder rotate | Scroll through lists |
 | Center button | Select / confirm |
-| Top button | Back / Menu |
-| Bottom button | Play / Pause |
+| Top button (tap) | Back / Menu |
+| Top button (hold) | Jump to Home menu |
+| Bottom button (tap) | Play / Pause |
+| Bottom button (hold) | Jump to Now Playing |
 | Left button | Previous track |
 | Right button | Next track |
 
@@ -167,7 +169,8 @@ pio device monitor
 
 | Screen | Encoder action |
 |--------|---------------|
-| Any list (Artists, Albums, Songs, Menus) | Scrolls the list |
+| Any list (Menus, Songs) | Scrolls the list one item per tick |
+| Artists or Albums list | Slow spin scrolls normally; fast spin (8 ticks < 60 ms apart, list ≥ 12 items) activates **Alpha-Jump** — encoder steps through first letters in the list; large letter overlay shows position; 600 ms idle exits and lands on first item for that letter |
 | Now Playing | Scroll 6+ ticks to enter **Volume** overlay; auto-exits after 2s idle |
 | Settings → Brightness | Adjusts screen brightness; press Top (Back) to save and exit |
 
@@ -181,7 +184,7 @@ All settings are saved to NVS flash and restored on every boot.
 |---------|--------------|-------|
 | Volume | From Now Playing, scroll encoder 6+ ticks | 0–100% |
 | Screen brightness | Settings → Brightness, then turn encoder | 0–255 |
-| Text size | Settings → Text Size (toggles Small ↔ Large) | Small or Large |
+| Text size | Settings → Text Size (cycles Small → Medium → Large) | Small, Medium, or Large |
 
 ---
 
@@ -189,7 +192,7 @@ All settings are saved to NVS flash and restored on every boot.
 
 Rouge uses a two-tier architecture:
 
-**Desktop tier:** `music_indexer.py` scans the SD card's `Music/` folder, reads metadata from MP3 and M4A files (audio tags or folder/filename structure), and writes a SQLite database (`music.db`) with normalized artist, album, and song records. For M4A files it also parses the MP4 box structure and stores seven AAC layout fields (`mdat_start`, `stsz_offset`, `sample_count`, `fixed_size`, `aac_profile`, `aac_sr_idx`, `aac_ch_cfg`) so the player can begin decoding instantly without scanning the file at runtime.
+**Desktop tier:** `music_indexer.py` scans the SD card's `Music/` folder, reads metadata from MP3 and M4A files (audio tags or folder/filename structure), and writes a SQLite database (`music.db`) with normalized artist, album, and song records. For M4A files it also parses the MP4 box structure and stores seven AAC layout fields (`mdat_start`, `stsz_offset`, `sample_count`, `fixed_size`, `aac_profile`, `aac_sr_idx`, `aac_ch_cfg`) plus JPEG cover art location (`covr_offset`, `covr_size`) so the player can begin decoding instantly and display album art without scanning the file at runtime.
 
 **Embedded tier:** On boot, the ESP32 loads `music.db` entirely into PSRAM and queries it for fast, zero-latency list browsing. Selected songs are decoded from the SD card — MP3 via the Helix MP3 codec, M4A/AAC via a custom `M4AFile32Demuxer` + Helix AAC decoder (with `VolumeStream` for independent volume control) — and streamed via Bluetooth A2DP to the connected speaker. The active decoder is selected automatically based on the file extension. All display rendering is done into a full-screen PSRAM sprite and flushed to the ST7789 in a single DMA burst, eliminating flicker.
 

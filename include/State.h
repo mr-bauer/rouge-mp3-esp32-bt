@@ -24,8 +24,8 @@
 #define DISPLAY_HEADER_UPDATE_INTERVAL 5000  // Update header every 5 seconds
 
 // Encoder
-#define ENCODER_UPDATE_INTERVAL 90       // Throttle encoder updates (ms)
-#define ENCODER_JUMP_THRESHOLD 3         // Anti-jump protection
+#define ENCODER_UPDATE_INTERVAL 20       // Throttle encoder updates (ms)
+#define ENCODER_JUMP_THRESHOLD 8         // Anti-jump protection
 #define ENCODER_DIRECTION_HISTORY_SIZE 5 // Direction filtering samples
 #define ENCODER_DIRECTION_LOCK_THRESHOLD 3  // Steps before locking direction
 
@@ -33,6 +33,7 @@
 #define BUTTON_DEBOUNCE_MS 300           // General button debounce
 #define BUTTON_MIN_DURATION_ADC 10       // Min press duration for ADC pins
 #define BUTTON_SUPPRESS_TIME 300         // Suppress buttons during scroll
+#define LONG_PRESS_MS 700                // Hold duration to trigger long press
 
 // Bluetooth
 #define BT_WATCHDOG_INTERVAL 500         // Connection watchdog check (ms)
@@ -123,10 +124,18 @@ extern std::vector<std::string> artists;
 extern std::vector<std::string> albums;
 extern std::vector<Song> songs;
 
-// Navigation indices
+// Navigation indices (browse position — may differ from playing position)
 extern volatile int artistIndex;
 extern volatile int albumIndex;
 extern volatile int songIndex;
+
+// Playback-position context (separate from browse position so autoNext/autoPrevious
+// always advance from where we are PLAYING, not where the user is browsing)
+extern int playingSongIndex;
+extern int playingAlbumIndex;
+extern int playingArtistIndex;
+extern std::string playingArtist;
+extern std::string playingAlbum;
 
 // Playback state
 enum PlayerState { STATE_STOPPED, STATE_PLAYING, STATE_PAUSED };
@@ -168,6 +177,24 @@ extern bool forceDisplayRedraw;
 extern int textSizePreference;  // 1 (small/6x8px) or 2 (large/12x16px)
 extern int themeIndex;          // 0 = dark, 1 = light
 extern bool albumArtAvailable;
+
+// Alpha fast-scroll
+#define FAST_SCROLL_TRIGGER_TICKS  8     // consecutive fast ticks to activate
+#define FAST_SCROLL_TICK_MS        60    // max ms between ticks to be "fast"
+#define FAST_SCROLL_TIMEOUT_MS     600   // ms idle → exit fast scroll
+#define FAST_SCROLL_MIN_LIST       12    // min list size before feature activates
+#define FAST_SCROLL_ALPHA_STEP_MS  150   // min ms between letter advances in alpha mode
+
+struct AlphaEntry { char letter; int firstIndex; };
+extern std::vector<AlphaEntry> alphaIndex;
+extern bool          fastScrollActive;
+extern char          fastScrollLetter;
+extern int           fastScrollAlphaIdx;
+extern unsigned long fastScrollLastTick;
+extern unsigned long fastScrollLastStep;
+
+void buildAlphaIndex(MenuType menu);
+void initFastScrollPosition(int currentIdx);
 
 // Menu functions
 void buildMainMenu();

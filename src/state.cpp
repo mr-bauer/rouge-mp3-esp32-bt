@@ -23,10 +23,17 @@ std::vector<std::string> artists;
 std::vector<std::string> albums;
 std::vector<Song> songs;
 
-// Navigation indices
+// Navigation indices (browse position)
 volatile int artistIndex = 0;
 volatile int albumIndex = 0;
 volatile int songIndex = 0;
+
+// Playback-position context (where we're actually playing from)
+int playingSongIndex = 0;
+int playingAlbumIndex = 0;
+int playingArtistIndex = 0;
+std::string playingArtist;
+std::string playingAlbum;
 
 // Playback state
 volatile PlayerState player_state = STATE_STOPPED;
@@ -59,9 +66,51 @@ volatile unsigned long pauseStartMillis    = 0;
 
 // Display control - NEW
 bool forceDisplayRedraw = false;
-int textSizePreference = 2;  // 1 (small/6x8px) or 2 (large/12x16px)
+int textSizePreference = 2;  // 1=small (6x8px), 2=medium (DejaVu12), 3=large (12x16px)
 int themeIndex = 0;           // 0 = dark, 1 = light
 bool albumArtAvailable = false;
+
+// Alpha fast-scroll
+std::vector<AlphaEntry> alphaIndex;
+bool          fastScrollActive   = false;
+char          fastScrollLetter   = 'A';
+int           fastScrollAlphaIdx = 0;
+unsigned long fastScrollLastTick = 0;
+unsigned long fastScrollLastStep = 0;
+
+void buildAlphaIndex(MenuType menu) {
+  alphaIndex.clear();
+  fastScrollActive   = false;
+  fastScrollAlphaIdx = 0;
+  fastScrollLastStep = 0;
+
+  auto addEntry = [&](char raw, int idx) {
+    char c = toupper((unsigned char)raw);
+    if (c < 'A' || c > 'Z') c = '#';
+    if (alphaIndex.empty() || alphaIndex.back().letter != c)
+      alphaIndex.push_back({c, idx});
+  };
+
+  if (menu == MENU_ARTIST_LIST) {
+    for (int i = 0; i < (int)artists.size(); i++)
+      if (!artists[i].empty()) addEntry(artists[i][0], i);
+  } else if (menu == MENU_ALBUM_LIST) {
+    for (int i = 0; i < (int)albums.size(); i++)
+      if (!albums[i].empty()) addEntry(albums[i][0], i);
+  } else if (menu == MENU_SONG_LIST) {
+    for (int i = 0; i < (int)songs.size(); i++)
+      if (!songs[i].title.empty()) addEntry(songs[i].title[0], i);
+  }
+}
+
+void initFastScrollPosition(int currentIdx) {
+  fastScrollAlphaIdx = 0;
+  for (int i = 0; i < (int)alphaIndex.size(); i++) {
+    if (alphaIndex[i].firstIndex <= currentIdx) fastScrollAlphaIdx = i;
+    else break;
+  }
+  fastScrollLetter = alphaIndex.empty() ? '?' : alphaIndex[fastScrollAlphaIdx].letter;
+}
 
 // Menu builders
 void buildMainMenu() {
@@ -86,7 +135,7 @@ void buildSettingsMenu() {
   currentMenuItems.clear();
   currentMenuItems.push_back(MenuItem("Brightness", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem(
-    textSizePreference == 1 ? "Text Size: Small" : "Text Size: Large",
+    textSizePreference == 1 ? "Text Size: Small" : (textSizePreference == 2 ? "Text Size: Medium" : "Text Size: Large"),
     MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem(
     themeIndex == 0 ? "Theme: Dark" : "Theme: Light",
@@ -152,6 +201,7 @@ void navigateToMenu(MenuType menu) {
     case MENU_ARTIST_LIST:
       // Keep existing artist list
       menuIndex = artistIndex;
+      buildAlphaIndex(MENU_ARTIST_LIST);
       break;
     case MENU_ALBUM_LIST:
       menuIndex = albumIndex;
@@ -199,8 +249,11 @@ void navigateBack() {
     case MENU_BLUETOOTH:
       buildBluetoothMenu();
       break;
+    case MENU_ARTIST_LIST: buildAlphaIndex(MENU_ARTIST_LIST); break;
+    case MENU_ALBUM_LIST:  buildAlphaIndex(MENU_ALBUM_LIST);  break;
+    case MENU_SONG_LIST:   buildAlphaIndex(MENU_SONG_LIST);   break;
     default:
-      // Music browser screens don't need rebuilding
+      // Other screens don't need rebuilding
       break;
   }
 }

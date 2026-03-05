@@ -46,6 +46,22 @@ uint16_t COLOR_ACCENT    = 0x051F;
 uint16_t COLOR_HEADER    = 0xFFFF;
 uint16_t COLOR_SEPARATOR = 0x4208;
 
+// Apply the right font + scale for the current textSizePreference.
+// 1=small (DejaVu9 @1x), 2=medium (DejaVu12 @1x), 3=large (DejaVu18 @1x).
+// Call this before any content-area text draw; header code resets font to nullptr explicitly.
+static void applyContentFont(lgfx::LGFXBase& gfx) {
+    if (textSizePreference == 1) {
+        gfx.setFont(&lgfx::fonts::DejaVu9);
+        gfx.setTextSize(1);
+    } else if (textSizePreference == 2) {
+        gfx.setFont(&lgfx::fonts::DejaVu12);
+        gfx.setTextSize(1);
+    } else {
+        gfx.setFont(&lgfx::fonts::DejaVu18);
+        gfx.setTextSize(1);
+    }
+}
+
 void applyTheme(int themeIdx) {
   if (themeIdx == 1) {  // Light
     COLOR_BG        = 0xFFFF;
@@ -281,14 +297,18 @@ void drawLightningIcon(int x, int y, uint16_t color) {
 }
 
 // Truncate text to fit a menu item row at the current font size.
-// Available width = 320 - 8px padding - 20px arrow = 292px
-// Size 1: 6px/char → 48 chars max; Size 2: 12px/char → 24 chars max
+// Measures pixel width using the active content font so it works for all
+// three size preferences including proportional fonts (e.g. DejaVu12).
 static std::string truncateForDisplay(const char* text) {
   if (!text) return "";
-  int maxChars = (textSizePreference == 1) ? 48 : 24;
   std::string s(text);
-  if ((int)s.length() <= maxChars) return s;
-  return s.substr(0, maxChars - 3) + "...";
+  // Set the content font on sprite so textWidth() is accurate
+  applyContentFont(sprite);
+  const int maxW = SCREEN_WIDTH - UI_PADDING - 20;  // padding + arrow
+  if (sprite.textWidth(s.c_str()) <= maxW) return s;
+  while (s.size() > 3 && sprite.textWidth((s + "...").c_str()) > maxW)
+    s.pop_back();
+  return s + "...";
 }
 
 void drawMenuItem(const char* text, int y, bool selected, bool disabled)
@@ -296,9 +316,9 @@ void drawMenuItem(const char* text, int y, bool selected, bool disabled)
   if (!text) return;
 
   sprite.setTextWrap(false);
-  sprite.setTextSize(textSizePreference);
+  applyContentFont(sprite);
 
-  int textOffsetY = (textSizePreference == 1) ? y + 1 : y + 4;
+  int textOffsetY = (textSizePreference == 1) ? y + 1 : (textSizePreference == 2) ? y + 1 : y + 6;
   std::string displayText = truncateForDisplay(text);
 
   if (selected) {
@@ -326,9 +346,9 @@ void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disab
   if (!text) return;
 
   sprite.setTextWrap(false);
-  sprite.setTextSize(textSizePreference);
+  applyContentFont(sprite);
 
-  int textOffsetY = (textSizePreference == 1) ? y + 1 : y + 4;
+  int textOffsetY = (textSizePreference == 1) ? y + 1 : (textSizePreference == 2) ? y + 1 : y + 6;
   std::string displayText = truncateForDisplay(text);
 
   if (selected) {
@@ -345,22 +365,21 @@ void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disab
 
   if (isPlaying) {
     int iconX = SCREEN_WIDTH - 20;
-    int iconY = (textSizePreference == 1) ? y + 2 : y + 8;
+    int iconSize = (textSizePreference == 1) ? 8 : (textSizePreference == 2) ? 10 : 12;
+    int iconY = (y - 4) + (uiItemHeight() - iconSize) / 2;  // row box starts at y-4
 
     if (playState == STATE_PLAYING) {
-      int iconSize = (textSizePreference == 1) ? 8 : 12;
       sprite.fillTriangle(
         iconX, iconY, iconX, iconY + iconSize, iconX + iconSize, iconY + iconSize/2,
         selected ? COLOR_BG : COLOR_SELECTED
       );
     } else if (playState == STATE_PAUSED) {
       int barWidth = (textSizePreference == 1) ? 3 : 4;
-      int barHeight = (textSizePreference == 1) ? 8 : 12;
       int gap = (textSizePreference == 1) ? 2 : 3;
       uint16_t color = selected ? COLOR_BG : COLOR_DISABLED;
 
-      sprite.fillRect(iconX, iconY, barWidth, barHeight, color);
-      sprite.fillRect(iconX + barWidth + gap, iconY, barWidth, barHeight, color);
+      sprite.fillRect(iconX, iconY, barWidth, iconSize, color);
+      sprite.fillRect(iconX + barWidth + gap, iconY, barWidth, iconSize, color);
     }
   } else if (!disabled && !selected) {
     sprite.setCursor(SCREEN_WIDTH - 20, textOffsetY);
@@ -376,6 +395,7 @@ void drawScrollIndicator(int currentIndex, int listSize) {
   sprite.fillRect(SCREEN_WIDTH - UI_SCROLL_INDICATOR_WIDTH,
                   SCREEN_HEIGHT - 30, UI_SCROLL_INDICATOR_WIDTH, 20, COLOR_BG);
 
+  sprite.setFont(nullptr);
   sprite.setTextSize(1);
   sprite.setTextColor(COLOR_TEXT);
   sprite.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
@@ -385,7 +405,7 @@ void drawScrollIndicator(int currentIndex, int listSize) {
 void drawControlBar(int centerY, const char* label, int value, int maxValue,
                    const char* unit) {
   // Label
-  sprite.setTextSize(textSizePreference);
+  applyContentFont(sprite);
   sprite.setTextColor(COLOR_TEXT);
   drawCenteredText(sprite, label, centerY);
   centerY += 30;
@@ -393,6 +413,7 @@ void drawControlBar(int centerY, const char* label, int value, int maxValue,
   // Value with unit
   char valueText[16];
   snprintf(valueText, sizeof(valueText), "%d%s", value, unit);
+  sprite.setFont(nullptr);
   sprite.setTextSize(3);
   drawCenteredText(sprite, valueText, centerY);
   centerY += 40;
@@ -477,9 +498,10 @@ static void drawBatteryIcon(int x, int y, int percent, bool charging) {
   // 5. Nub — solid white, vertically centered on body
   sprite.fillRect(x + W, y + (H - NUB_H) / 2, NUB_W, NUB_H, COLOR_TEXT);
 
-  // 6. Number only (no %) centered on body in black
+  // 6. Number only (no %) centered on body in black — always use default bitmap font
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", percent);
+  sprite.setFont(nullptr);  // reset from any inherited DejaVu font
   sprite.setTextSize(1);
   sprite.setTextColor(COLOR_BG);
   int16_t tw = sprite.textWidth(buf);
@@ -518,10 +540,12 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
     }
   }
 
-  // Header bar — black background
+  // Header bar — DejaVu18 @1x, vertically centered in 40px header
+  sprite.setFont(&lgfx::fonts::DejaVu18);
+  sprite.setTextSize(1);
   sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_BG);
   sprite.setTextColor(COLOR_HEADER);
-  drawCenteredText(sprite, headerText, 12, 2);
+  drawCenteredText(sprite, headerText, 8, 1);
 
   // Playback indicator
   if (player_state == STATE_PLAYING || player_state == STATE_PAUSED) {
@@ -644,6 +668,28 @@ void updateMenuList(MenuType menu, int idx, bool fullRedraw) {
   drawScrollIndicator(idx, listSize);
 }
 
+static void drawAlphaScrollOverlay() {
+  const int OW = 90, OH = 70;
+  const int OX = (SCREEN_WIDTH - OW) / 2;
+  const int OY = UI_HEADER_HEIGHT + (SCREEN_HEIGHT - UI_HEADER_HEIGHT - OH) / 2;
+
+  sprite.fillRoundRect(OX, OY, OW, OH, 8, COLOR_SELECTED);
+  sprite.drawRoundRect(OX, OY, OW, OH, 8, COLOR_TEXT);
+
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_BG);
+  drawCenteredText(sprite, "Jump to", OY + 8, 1);
+
+  char ls[2] = { fastScrollLetter, '\0' };
+  sprite.setTextSize(4);
+  int tw = sprite.textWidth(ls);
+  sprite.setCursor(OX + (OW - tw) / 2, OY + 22);
+  sprite.print(ls);
+
+  sprite.setTextColor(COLOR_TEXT);
+}
+
 void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
   int listSize = 0;
   int arrayIndex = 0;
@@ -674,11 +720,19 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
                                          lastWindowStart[arrayIndex],
                                          listSize, uiMaxVisibleItems());
 
+  // Guard: ensure selected item is actually visible (handles large index jumps from alpha scroll)
+  if (idx < windowStart || idx >= windowStart + uiMaxVisibleItems()) {
+    windowStart = idx - uiMaxVisibleItems() / 2;
+    if (windowStart < 0) windowStart = 0;
+    if (windowStart > listSize - uiMaxVisibleItems()) windowStart = listSize - uiMaxVisibleItems();
+  }
+
   bool windowChanged = (windowStart != lastWindowStart[arrayIndex]) || fullRedraw;
   lastWindowStart[arrayIndex] = windowStart;
 
-  // Draw subheader if needed
+  // Draw subheader if needed (always small/default font regardless of textSizePreference)
   if (fullRedraw && subheader) {
+    sprite.setFont(nullptr);
     sprite.setTextSize(1);
     sprite.setTextColor(COLOR_DISABLED);
     sprite.setCursor(8, 45);
@@ -695,13 +749,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
 
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentArtist.empty() &&
-                    (*items)[windowStart + i] == currentArtist);
+        isPlaying = (player_state != STATE_STOPPED && !playingArtist.empty() &&
+                    (*items)[windowStart + i] == playingArtist);
         drawMenuItemWithPlayback((*items)[windowStart + i].c_str(), y, selected,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_ALBUM_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentAlbum.empty() &&
-                    (*items)[windowStart + i] == currentAlbum);
+        isPlaying = (player_state != STATE_STOPPED && !playingAlbum.empty() &&
+                    (*items)[windowStart + i] == playingAlbum);
         drawMenuItemWithPlayback((*items)[windowStart + i].c_str(), y, selected,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_SONG_LIST) {
@@ -720,13 +774,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
 
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentArtist.empty() &&
-                    (*items)[lastDisplayedIndex] == currentArtist);
+        isPlaying = (player_state != STATE_STOPPED && !playingArtist.empty() &&
+                    (*items)[lastDisplayedIndex] == playingArtist);
         drawMenuItemWithPlayback((*items)[lastDisplayedIndex].c_str(), y, false,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_ALBUM_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentAlbum.empty() &&
-                    (*items)[lastDisplayedIndex] == currentAlbum);
+        isPlaying = (player_state != STATE_STOPPED && !playingAlbum.empty() &&
+                    (*items)[lastDisplayedIndex] == playingAlbum);
         drawMenuItemWithPlayback((*items)[lastDisplayedIndex].c_str(), y, false,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_SONG_LIST) {
@@ -744,13 +798,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
 
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentArtist.empty() &&
-                    (*items)[idx] == currentArtist);
+        isPlaying = (player_state != STATE_STOPPED && !playingArtist.empty() &&
+                    (*items)[idx] == playingArtist);
         drawMenuItemWithPlayback((*items)[idx].c_str(), y, true, false,
                                 isPlaying, player_state);
       } else if (menu == MENU_ALBUM_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentAlbum.empty() &&
-                    (*items)[idx] == currentAlbum);
+        isPlaying = (player_state != STATE_STOPPED && !playingAlbum.empty() &&
+                    (*items)[idx] == playingAlbum);
         drawMenuItemWithPlayback((*items)[idx].c_str(), y, true, false,
                                 isPlaying, player_state);
       } else if (menu == MENU_SONG_LIST) {
@@ -766,6 +820,10 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
   lastDisplayedIndex = idx;
 
   drawScrollIndicator(idx, listSize);
+
+  if (fastScrollActive) {
+    drawAlphaScrollOverlay();
+  }
 }
 
 void updateBrightnessScreen() {
@@ -785,7 +843,7 @@ void updateBrightnessScreen() {
 }
 
 void updateVolumeScreen() {
-  sprite.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
+  sprite.fillRect(0, UI_HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - UI_HEADER_HEIGHT, COLOR_BG);
   drawControlBar(90, "Volume", currentVolume, 100, "%");
 }
 
@@ -866,12 +924,12 @@ void updateNowPlayingScreen() {
     sprite.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, COLOR_BG);
     drawAlbumArt(ART_X, ART_Y, ART_SIZE);
 
-    int charsPerLine = TEXT_W / (textSizePreference == 1 ? 6 : 12);
-    int lineSpacing  = textSizePreference == 1 ? 10 : 22;
+    int charsPerLine = TEXT_W / (textSizePreference == 1 ? 6 : (textSizePreference == 2 ? 8 : 10));
+    int lineSpacing  = textSizePreference == 1 ? 10 : (textSizePreference == 2 ? 15 : 26);
     int y = 90;
 
     if (strlen(title) > 0) {
-      sprite.setTextSize(textSizePreference);
+      applyContentFont(sprite);
       sprite.setTextColor(COLOR_TEXT);
       String titleStr = String(title);
       for (int line = 0; line < 2 && !titleStr.isEmpty(); line++) {
@@ -883,6 +941,7 @@ void updateNowPlayingScreen() {
       y += 2 * lineSpacing + 8;
     }
 
+    sprite.setFont(nullptr);
     sprite.setTextSize(1);
     sprite.setTextColor(COLOR_DISABLED);
     if (strlen(artist) > 0) {
@@ -901,22 +960,23 @@ void updateNowPlayingScreen() {
 
   } else {
     // No art: centered layout using full width
-    int charsPerLine = textSizePreference == 1 ? 46 : 24;
-    int lineSpacing  = textSizePreference == 1 ? 10 : 20;
+    int charsPerLine = textSizePreference == 1 ? 46 : (textSizePreference == 2 ? 36 : 30);
+    int lineSpacing  = textSizePreference == 1 ? 10 : (textSizePreference == 2 ? 15 : 26);
     int y = 80;
 
     if (strlen(title) > 0) {
-      sprite.setTextSize(textSizePreference);
+      applyContentFont(sprite);
       sprite.setTextColor(COLOR_TEXT);
       String titleStr = String(title);
       for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
         String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
-        drawCenteredText(sprite, chunk.c_str(), y + line * lineSpacing, textSizePreference);
+        drawCenteredText(sprite, chunk.c_str(), y + line * lineSpacing, 1);
         titleStr = titleStr.substring(chunk.length());
       }
-      y += textSizePreference == 1 ? 50 : 80;
+      y += textSizePreference == 1 ? 50 : (textSizePreference == 2 ? 65 : 80);
     }
 
+    sprite.setFont(nullptr);
     sprite.setTextSize(1);
     sprite.setTextColor(COLOR_DISABLED);
     if (strlen(artist) > 0) {
@@ -965,6 +1025,7 @@ void updateNowPlayingScreen() {
   else
     snprintf(totalStr, sizeof(totalStr), "--:--");
 
+  sprite.setFont(nullptr);
   sprite.setTextSize(1);
   sprite.setTextColor(COLOR_DISABLED);
   sprite.setCursor(BAR_X, BAR_Y + BAR_H + 4);
@@ -1006,7 +1067,7 @@ void updateDisplay()
     sprite.fillSprite(COLOR_BG);
   }
 
-  sprite.setTextSize(textSizePreference);
+  applyContentFont(sprite);
   sprite.setTextColor(COLOR_TEXT);
   sprite.setTextWrap(false);
 

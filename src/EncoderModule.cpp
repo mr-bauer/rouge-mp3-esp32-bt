@@ -75,6 +75,7 @@ bool isEncoderScrolling() {
 
 void updateEncoder()
 {
+  static int fastScrollTickCount = 0;
   int newPos = encoder.getPosition();
   
   if (newPos != lastPos)
@@ -94,6 +95,7 @@ void updateEncoder()
     if (now - lastEncoderUpdate < ENCODER_UPDATE_INTERVAL) {
       return;
     }
+    unsigned long tickInterval = now - lastEncoderMovement;  // time since last accepted tick
     lastEncoderUpdate = now;
     lastEncoderMovement = now;
     lastActivityTime = now;     // reset inactivity timer
@@ -261,66 +263,114 @@ void updateEncoder()
       }
       else if (currentMenu == MENU_ARTIST_LIST && !artists.empty())
       {
-        int oldIndex = artistIndex;
         int listSize = artists.size();
-        
-        artistIndex += step;
-        
-        if (artistIndex < 0) {
-          artistIndex = 0;
-        } else if (artistIndex >= listSize) {
-          artistIndex = listSize - 1;
+
+        // Direction change → reset activation counter (but don't exit alpha mode)
+        if (consecutiveSameDirection == 1) {
+          fastScrollTickCount = 0;
         }
-        
-        if (oldIndex != artistIndex) {
-          displayNeedsUpdate = true;
-          
-          #ifdef DEBUG
-          Serial.printf("Artist: %d -> %d (%s)\n", 
-                       oldIndex, artistIndex, artists[artistIndex].c_str());
-          #endif
+
+        // Count fast ticks for activation; once active, speed doesn't matter
+        if (!fastScrollActive) {
+          if (tickInterval < FAST_SCROLL_TICK_MS) fastScrollTickCount++;
+          else                                    fastScrollTickCount = 0;
+        }
+
+        // Activate when threshold met on a large enough list
+        if (!fastScrollActive
+            && fastScrollTickCount >= FAST_SCROLL_TRIGGER_TICKS
+            && listSize >= FAST_SCROLL_MIN_LIST
+            && !alphaIndex.empty()) {
+          fastScrollActive = true;
+          initFastScrollPosition(artistIndex);
+        }
+
+        if (fastScrollActive && !alphaIndex.empty()) {
+          fastScrollLastTick = now;  // every tick resets idle timeout
+          if (now - fastScrollLastStep >= FAST_SCROLL_ALPHA_STEP_MS) {
+            fastScrollAlphaIdx += step;
+            if (fastScrollAlphaIdx < 0) fastScrollAlphaIdx = 0;
+            if (fastScrollAlphaIdx >= (int)alphaIndex.size())
+              fastScrollAlphaIdx = (int)alphaIndex.size() - 1;
+            fastScrollLastStep = now;
+            artistIndex        = alphaIndex[fastScrollAlphaIdx].firstIndex;
+            fastScrollLetter   = alphaIndex[fastScrollAlphaIdx].letter;
+            displayNeedsUpdate = true;
+          }
+        } else {
+          int oldIndex = artistIndex;
+          artistIndex += step;
+          if (artistIndex < 0) artistIndex = 0;
+          else if (artistIndex >= listSize) artistIndex = listSize - 1;
+          if (oldIndex != artistIndex) {
+            displayNeedsUpdate = true;
+            #ifdef DEBUG
+            Serial.printf("Artist: %d -> %d (%s)\n",
+                         oldIndex, artistIndex, artists[artistIndex].c_str());
+            #endif
+          }
         }
       }
       else if (currentMenu == MENU_ALBUM_LIST && !albums.empty())
       {
-        int oldIndex = albumIndex;
         int listSize = albums.size();
-        
-        albumIndex += step;
-        
-        if (albumIndex < 0) {
-          albumIndex = 0;
-        } else if (albumIndex >= listSize) {
-          albumIndex = listSize - 1;
+
+        if (consecutiveSameDirection == 1) {
+          fastScrollTickCount = 0;
         }
-        
-        if (oldIndex != albumIndex) {
-          displayNeedsUpdate = true;
-          
-          #ifdef DEBUG
-          Serial.printf("Album: %d -> %d (%s)\n", 
-                       oldIndex, albumIndex, albums[albumIndex].c_str());
-          #endif
+
+        if (!fastScrollActive) {
+          if (tickInterval < FAST_SCROLL_TICK_MS) fastScrollTickCount++;
+          else                                    fastScrollTickCount = 0;
+        }
+
+        if (!fastScrollActive
+            && fastScrollTickCount >= FAST_SCROLL_TRIGGER_TICKS
+            && listSize >= FAST_SCROLL_MIN_LIST
+            && !alphaIndex.empty()) {
+          fastScrollActive = true;
+          initFastScrollPosition(albumIndex);
+        }
+
+        if (fastScrollActive && !alphaIndex.empty()) {
+          fastScrollLastTick = now;  // every tick resets idle timeout
+          if (now - fastScrollLastStep >= FAST_SCROLL_ALPHA_STEP_MS) {
+            fastScrollAlphaIdx += step;
+            if (fastScrollAlphaIdx < 0) fastScrollAlphaIdx = 0;
+            if (fastScrollAlphaIdx >= (int)alphaIndex.size())
+              fastScrollAlphaIdx = (int)alphaIndex.size() - 1;
+            fastScrollLastStep = now;
+            albumIndex         = alphaIndex[fastScrollAlphaIdx].firstIndex;
+            fastScrollLetter   = alphaIndex[fastScrollAlphaIdx].letter;
+            displayNeedsUpdate = true;
+          }
+        } else {
+          int oldIndex = albumIndex;
+          albumIndex += step;
+          if (albumIndex < 0) albumIndex = 0;
+          else if (albumIndex >= listSize) albumIndex = listSize - 1;
+          if (oldIndex != albumIndex) {
+            displayNeedsUpdate = true;
+            #ifdef DEBUG
+            Serial.printf("Album: %d -> %d (%s)\n",
+                         oldIndex, albumIndex, albums[albumIndex].c_str());
+            #endif
+          }
         }
       }
       else if (currentMenu == MENU_SONG_LIST && !songs.empty())
       {
         int oldIndex = songIndex;
         int listSize = songs.size();
-        
+
         songIndex += step;
-        
-        if (songIndex < 0) {
-          songIndex = 0;
-        } else if (songIndex >= listSize) {
-          songIndex = listSize - 1;
-        }
-        
+        if (songIndex < 0) songIndex = 0;
+        else if (songIndex >= listSize) songIndex = listSize - 1;
+
         if (oldIndex != songIndex) {
           displayNeedsUpdate = true;
-          
           #ifdef DEBUG
-          Serial.printf("Song: %d -> %d (%s)\n", 
+          Serial.printf("Song: %d -> %d (%s)\n",
                        oldIndex, songIndex, songs[songIndex].title.c_str());
           #endif
         }
@@ -368,7 +418,17 @@ void updateEncoder()
         volumeModeTicks = 0;
       }
     }
-    
+
+    // Fast-scroll timeout: exit alpha mode after idle
+    if (fastScrollActive) {
+      if (millis() - fastScrollLastTick > FAST_SCROLL_TIMEOUT_MS) {
+        fastScrollActive    = false;
+        fastScrollTickCount = 0;
+        forceDisplayRedraw  = true;   // full redraw clears the overlay pixels
+        displayNeedsUpdate  = true;
+      }
+    }
+
     // Reset direction history if stopped scrolling
     if (millis() - lastEncoderUpdate > 500) {
       for (int i = 0; i < ENCODER_DIRECTION_HISTORY_SIZE; i++) {  // UPDATED
@@ -379,6 +439,7 @@ void updateEncoder()
       lastScrollDirection = 0;
       homeTickAccum = 0;
       homeTickDir   = 0;
+      fastScrollTickCount = 0;
     }
   }
 }

@@ -110,18 +110,18 @@ Leading track-number prefixes (`"01 - "`, `"02. "`, `"3 "`, etc.) are stripped f
 1. Recursively walks `music_folder` for `.mp3` and `.m4a` files; all other file types are skipped
 2. Skips macOS system files automatically (`.DS_Store`, `._*`, `.Spotlight-V100`, `.Trashes`, and any hidden file)
 3. **MP3 files:** reads ID3 tags using `mutagen` — extracts title, artist, album, track number, year, and duration
-4. **M4A files:** reads iTunes metadata atoms using `mutagen`, then additionally parses the raw MP4 box structure to extract the AAC audio layout needed for fast on-device playback (see [M4A Metadata Extraction](#m4a-metadata-extraction) below)
+4. **M4A files:** reads iTunes metadata atoms using `mutagen`, then additionally parses the raw MP4 box structure to extract the AAC audio layout and JPEG cover art location needed for fast on-device playback (see [M4A Metadata Extraction](#m4a-metadata-extraction) below)
 5. Falls back to `"Unknown Artist"` / `"Unknown Album"` / the filename if tags are missing
 6. Normalizes text: decomposes Unicode (removes accents), replaces smart quotes and dashes, strips non-printable characters — all metadata is stored as plain ASCII for reliable rendering on the ESP32 display
 7. Stores file paths as `Music/<relative_path>` — matching how the ESP32 opens files from the SD card root
 8. Commits to SQLite in batches of 100 songs to handle large libraries without memory pressure
-9. Prints a summary (artists, albums, songs indexed; M4A metadata success/failure counts; errors; duplicates skipped)
+9. Prints a summary (artists, albums, songs indexed; M4A metadata success/failure counts; M4A art count; errors; duplicates skipped)
 
 ---
 
 ## M4A Metadata Extraction
 
-For M4A files the indexer performs an additional binary parse of the MP4 box (atom) structure to extract seven fields that the ESP32 uses to begin playback instantly — without scanning the file at runtime:
+For M4A files the indexer performs an additional binary parse of the MP4 box (atom) structure to extract nine fields that the ESP32 uses to begin playback instantly and display album art — without scanning the file at runtime:
 
 | Field | Description |
 |-------|-------------|
@@ -132,6 +132,8 @@ For M4A files the indexer performs an additional binary parse of the MP4 box (at
 | `aac_profile` | AAC audio object type (2 = AAC-LC) |
 | `aac_sr_idx` | Sample rate index (4 = 44 100 Hz, per ISO 14496-3 table) |
 | `aac_ch_cfg` | Channel configuration (2 = stereo) |
+| `covr_offset` | Byte offset where the JPEG cover art begins inside the file (0 = no art) |
+| `covr_size` | Byte count of the JPEG cover art data (0 = no art) |
 
 Without these fields the player would need to scan each M4A file from the beginning before starting playback (noticeable delay). With them, playback begins immediately.
 
@@ -141,25 +143,29 @@ Without these fields the player would need to scan each M4A file from the beginn
 - Locates the `stsz` box to read sample count and fixed sample size
 - Locates the `mdat` box to record the audio data start offset
 - Locates the `esds` descriptor inside the `mp4a` audio sample entry and reads the two-byte `AudioSpecificConfig` word to decode profile, sample rate index, and channel config
+- Walks `moov → udta → meta → ilst → covr → data` to locate embedded JPEG cover art; records the byte offset and size if a JPEG-type (`0x0000000D`) data box is found
 
 If any box is missing or the parse fails, the fields default to 0 and a warning is printed. The player detects this and falls back to a full runtime file scan — playback still works, just with a brief delay at start.
 
 The `-v` / `--verbose` flag prints per-file parse results:
 
 ```
-  ✅ mdat@120355 stsz@557 8753 samples profile=2 sr=44100Hz ch=2
+  ✅ mdat@120355 stsz@557 8753 samples profile=2 sr=44100Hz ch=2 covr@245120 (42316B JPEG)
+  ✅ mdat@98432 stsz@440 7201 samples profile=2 sr=44100Hz ch=2 no cover art
 ```
 
 A summary line is always printed at the end:
 
 ```
 M4A meta:  42/42 files parsed ✅ (fast startup)
+M4A art:   38/42 files have JPEG cover art 🖼️
 ```
 
 or, if some files failed:
 
 ```
 M4A meta:  39/42 files parsed ✅ (3 missing — those songs will scan at runtime)
+M4A art:   36/42 files have JPEG cover art 🖼️
 ```
 
 ---
@@ -242,7 +248,11 @@ CREATE TABLE songs (
     fixed_size   INTEGER DEFAULT 0,  -- fixed sample size in bytes (0 = variable)
     aac_profile  INTEGER DEFAULT 2,  -- AAC audio object type (2 = AAC-LC)
     aac_sr_idx   INTEGER DEFAULT 4,  -- sample rate index per ISO 14496-3 (4 = 44100 Hz)
-    aac_ch_cfg   INTEGER DEFAULT 2   -- channel configuration (2 = stereo)
+    aac_ch_cfg   INTEGER DEFAULT 2,  -- channel configuration (2 = stereo)
+
+    -- M4A cover art location (populated for .m4a files with embedded JPEG; 0 otherwise)
+    covr_offset  INTEGER DEFAULT 0,  -- byte offset of JPEG data inside the .m4a file
+    covr_size    INTEGER DEFAULT 0   -- byte count of JPEG data (0 = no art)
 );
 
 -- Indexes for fast lookup
@@ -252,7 +262,7 @@ CREATE INDEX idx_songs_album ON songs(album_id);
 CREATE INDEX idx_songs_title ON songs(title);
 ```
 
-The ESP32 loads this database entirely into PSRAM at boot using `sqlite3_deserialize()`, then runs all queries in memory for instant response times. The seven M4A layout columns are loaded alongside title/path/duration when a song list is opened — no extra queries at playback time.
+The ESP32 loads this database entirely into PSRAM at boot using `sqlite3_deserialize()`, then runs all queries in memory for instant response times. The nine M4A layout columns (seven for audio layout, two for cover art) are loaded alongside title/path/duration when a song list is opened — no extra queries at playback time.
 
 ---
 

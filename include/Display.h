@@ -70,9 +70,17 @@ public:
 };
 
 // UI Layout Constants
-// These two scale with textSizePreference (1=small, 2=large)
-inline int uiItemHeight()      { return textSizePreference == 1 ? 14 : 36; }
-inline int uiMaxVisibleItems() { return textSizePreference == 1 ? 13 : 5; }
+// These two scale with textSizePreference (1=small, 2=medium, 3=large)
+inline int uiItemHeight() {
+    if (textSizePreference == 1) return 14;
+    if (textSizePreference == 2) return 18;
+    return 36;
+}
+inline int uiMaxVisibleItems() {
+    if (textSizePreference == 1) return 13;
+    if (textSizePreference == 2) return 10;
+    return 5;
+}
 // Fixed layout constants (independent of font size)
 #define UI_START_Y 50
 #define UI_PADDING 8

@@ -159,7 +159,7 @@ int RougePreferences::loadTextSize() {
         return 2;
     }
 
-    return (size == 1 || size == 2) ? (int)size : 2;
+    return (size >= 1 && size <= 3) ? (int)size : 2;
 }
 
 // Theme functions

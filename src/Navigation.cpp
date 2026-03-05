@@ -95,7 +95,7 @@ void handleCenter()
         }
 
         if (item.label.find("Text Size:") == 0) {
-          textSizePreference = (textSizePreference == 1) ? 2 : 1;
+          textSizePreference = (textSizePreference % 3) + 1;  // cycles 1→2→3→1
           Serial.printf("🔤 Text size changed to: %d\n", textSizePreference);
           rougePrefs.saveTextSize(textSizePreference);
           buildSettingsMenu();
@@ -142,6 +142,7 @@ void handleCenter()
       hapticSelection();
       
       if (buildAlbumList(currentArtist)) {
+        buildAlphaIndex(MENU_ALBUM_LIST);
         navigateToMenu(MENU_ALBUM_LIST);
         albumIndex = 0;
       } else {
@@ -160,6 +161,7 @@ void handleCenter()
       hapticSelection();
       
       if (buildSongList(currentArtist, currentAlbum)) {
+        buildAlphaIndex(MENU_SONG_LIST);
         navigateToMenu(MENU_SONG_LIST);
         songIndex = 0;
       } else {
@@ -197,7 +199,14 @@ void handleCenter()
           stopPlayback();  // This properly stops and resets everything
           delay(100);      // Give it time to clean up
         }
-        
+
+        // Save playing context so autoNext/autoPrevious advance from this position
+        playingSongIndex = songIndex;
+        playingAlbumIndex = albumIndex;
+        playingArtistIndex = artistIndex;
+        playingArtist = currentArtist;
+        playingAlbum = currentAlbum;
+
         Serial.println("Starting new song");
         playCurrentSong(false);
         navigateToMenu(MENU_NOW_PLAYING);
@@ -246,6 +255,12 @@ void handleBottom()
   } else if (player_state == STATE_STOPPED) {
     // If stopped and we have songs, start playing
     if (!songs.empty()) {
+      // Save playing context so autoNext advances from this position
+      playingSongIndex = songIndex;
+      playingAlbumIndex = albumIndex;
+      playingArtistIndex = artistIndex;
+      playingArtist = currentArtist;
+      playingAlbum = currentAlbum;
       startPlayback();
       hapticSelection();
       navigateToMenu(MENU_NOW_PLAYING);
@@ -286,14 +301,50 @@ void handleRight()
   }
 }
 
+void handleTopLongPress()
+{
+  // Long press Top → jump to Home (main menu), clearing nav stack
+  Serial.println("🏠 Top LONG PRESS → Home");
+  hapticBack();
+  fastScrollActive = false;
+  menuStack.clear();
+  currentMenu = MENU_MAIN;
+  buildMainMenu();
+  menuIndex = 0;
+  forceDisplayRedraw = true;
+  displayNeedsUpdate = true;
+}
+
+void handleBottomLongPress()
+{
+  // Long press Bottom → jump to Now Playing
+  Serial.println("🎵 Bottom LONG PRESS → Now Playing");
+  hapticSelection();
+  navigateToMenu(MENU_NOW_PLAYING);
+  displayNeedsUpdate = true;
+}
+
 void autoPrevious()
 {
   Serial.println("Going to previous track...");
+
+  // Restore to playing context if the user has browsed to a different artist/album
+  if (playingArtist != currentArtist || playingAlbum != currentAlbum) {
+    Serial.println("📀 Restoring playing context before auto-previous");
+    artistIndex = playingArtistIndex;
+    currentArtist = playingArtist;
+    buildAlbumList(currentArtist);
+    albumIndex = playingAlbumIndex;
+    currentAlbum = playingAlbum;
+    buildSongList(currentArtist, currentAlbum);
+  }
+  songIndex = playingSongIndex;
 
   // Try previous song in current album
   if (songIndex - 1 >= 0)
   {
     songIndex--;
+    playingSongIndex = songIndex;
     playCurrentSong(true);
     displayNeedsUpdate = true;
     logRamSpace("auto previous - same album");
@@ -304,7 +355,7 @@ void autoPrevious()
   if (albumIndex - 1 >= 0)
   {
     albumIndex--;
-    
+
     currentAlbum = albums[albumIndex];
 
     if (buildSongList(currentArtist, currentAlbum))
@@ -312,6 +363,9 @@ void autoPrevious()
       if (!songs.empty())
       {
         songIndex = songs.size() - 1;  // Go to last song of previous album
+        playingSongIndex = songIndex;
+        playingAlbumIndex = albumIndex;
+        playingAlbum = currentAlbum;
         playCurrentSong(true);
         displayNeedsUpdate = true;
         logRamSpace("auto previous - previous album");
@@ -320,6 +374,9 @@ void autoPrevious()
       else
       {
         Serial.println("⚠️ Album has no songs, trying previous");
+        playingSongIndex = songIndex;
+        playingAlbumIndex = albumIndex;
+        playingAlbum = currentAlbum;
         autoPrevious();
         return;
       }
@@ -327,6 +384,9 @@ void autoPrevious()
     else
     {
       Serial.println("⚠️ Failed to load album songs");
+      playingSongIndex = songIndex;
+      playingAlbumIndex = albumIndex;
+      playingAlbum = currentAlbum;
       autoPrevious();
       return;
     }
@@ -336,7 +396,7 @@ void autoPrevious()
   if (artistIndex - 1 >= 0)
   {
     artistIndex--;
-    
+
     currentArtist = artists[artistIndex];
 
     if (buildAlbumList(currentArtist))
@@ -351,6 +411,11 @@ void autoPrevious()
           if (!songs.empty())
           {
             songIndex = songs.size() - 1;  // Go to last song
+            playingSongIndex = songIndex;
+            playingAlbumIndex = albumIndex;
+            playingArtistIndex = artistIndex;
+            playingArtist = currentArtist;
+            playingAlbum = currentAlbum;
             playCurrentSong(true);
             displayNeedsUpdate = true;
             logRamSpace("auto previous - previous artist");
@@ -359,6 +424,11 @@ void autoPrevious()
           else
           {
             Serial.println("⚠️ No songs found");
+            playingSongIndex = songIndex;
+            playingAlbumIndex = albumIndex;
+            playingArtistIndex = artistIndex;
+            playingArtist = currentArtist;
+            playingAlbum = currentAlbum;
             autoPrevious();
             return;
           }
@@ -367,6 +437,8 @@ void autoPrevious()
       else
       {
         Serial.println("⚠️ Artist has no albums");
+        playingArtistIndex = artistIndex;
+        playingArtist = currentArtist;
         autoPrevious();
         return;
       }
@@ -385,10 +457,23 @@ void autoNext()
 {
   Serial.println("Auto-advancing to next track...");
 
+  // Restore to playing context if the user has browsed to a different artist/album
+  if (playingArtist != currentArtist || playingAlbum != currentAlbum) {
+    Serial.println("📀 Restoring playing context before auto-advance");
+    artistIndex = playingArtistIndex;
+    currentArtist = playingArtist;
+    buildAlbumList(currentArtist);
+    albumIndex = playingAlbumIndex;
+    currentAlbum = playingAlbum;
+    buildSongList(currentArtist, currentAlbum);
+  }
+  songIndex = playingSongIndex;
+
   // Try next song in current album
   if (songIndex + 1 < (int)songs.size())
   {
     songIndex++;
+    playingSongIndex = songIndex;
     playCurrentSong(true);
     displayNeedsUpdate = true;
     logRamSpace("auto next - same album");
@@ -401,32 +486,38 @@ void autoNext()
     albumIndex++;
     songIndex = 0;
 
-    if (albumIndex < (int)albums.size())
-    {
-      currentAlbum = albums[albumIndex];
+    currentAlbum = albums[albumIndex];
 
-      if (buildSongList(currentArtist, currentAlbum))
+    if (buildSongList(currentArtist, currentAlbum))
+    {
+      if (!songs.empty())
       {
-        if (!songs.empty())
-        {
-          playCurrentSong(true);
-          displayNeedsUpdate = true;
-          logRamSpace("auto next - next album");
-          return;
-        }
-        else
-        {
-          Serial.println("⚠️ Album has no songs, trying next");
-          autoNext();
-          return;
-        }
+        playingSongIndex = songIndex;
+        playingAlbumIndex = albumIndex;
+        playingAlbum = currentAlbum;
+        playCurrentSong(true);
+        displayNeedsUpdate = true;
+        logRamSpace("auto next - next album");
+        return;
       }
       else
       {
-        Serial.println("⚠️ Failed to load album songs");
+        Serial.println("⚠️ Album has no songs, trying next");
+        playingSongIndex = songIndex;
+        playingAlbumIndex = albumIndex;
+        playingAlbum = currentAlbum;
         autoNext();
         return;
       }
+    }
+    else
+    {
+      Serial.println("⚠️ Failed to load album songs");
+      playingSongIndex = songIndex;
+      playingAlbumIndex = albumIndex;
+      playingAlbum = currentAlbum;
+      autoNext();
+      return;
     }
   }
 
@@ -437,39 +528,48 @@ void autoNext()
     albumIndex = 0;
     songIndex = 0;
 
-    if (artistIndex < (int)artists.size())
+    currentArtist = artists[artistIndex];
+
+    if (buildAlbumList(currentArtist))
     {
-      currentArtist = artists[artistIndex];
-
-      if (buildAlbumList(currentArtist))
+      if (!albums.empty())
       {
-        if (!albums.empty())
-        {
-          currentAlbum = albums[0];
+        currentAlbum = albums[0];
 
-          if (buildSongList(currentArtist, currentAlbum))
+        if (buildSongList(currentArtist, currentAlbum))
+        {
+          if (!songs.empty())
           {
-            if (!songs.empty())
-            {
-              playCurrentSong(true);
-              displayNeedsUpdate = true;
-              logRamSpace("auto next - next artist");
-              return;
-            }
-            else
-            {
-              Serial.println("⚠️ No songs found");
-              autoNext();
-              return;
-            }
+            playingSongIndex = songIndex;
+            playingAlbumIndex = albumIndex;
+            playingArtistIndex = artistIndex;
+            playingArtist = currentArtist;
+            playingAlbum = currentAlbum;
+            playCurrentSong(true);
+            displayNeedsUpdate = true;
+            logRamSpace("auto next - next artist");
+            return;
+          }
+          else
+          {
+            Serial.println("⚠️ No songs found");
+            playingSongIndex = songIndex;
+            playingAlbumIndex = albumIndex;
+            playingArtistIndex = artistIndex;
+            playingArtist = currentArtist;
+            playingAlbum = currentAlbum;
+            autoNext();
+            return;
           }
         }
-        else
-        {
-          Serial.println("⚠️ Artist has no albums");
-          autoNext();
-          return;
-        }
+      }
+      else
+      {
+        Serial.println("⚠️ Artist has no albums");
+        playingArtistIndex = artistIndex;
+        playingArtist = currentArtist;
+        autoNext();
+        return;
       }
     }
   }
