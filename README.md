@@ -24,7 +24,7 @@ See [Features.md](Features.md) for a complete feature list and the full roadmap.
 | Component | Description |
 |-----------|-------------|
 | Adafruit Feather ESP32 V2 | Main board (ESP32-PICO-MINI-02, 2MB PSRAM) |
-| ST7789 240×240 TFT display | 1.3" or 1.54" SPI display module |
+| ST7789 TFT display | 240×320 panel in landscape (default) **or** 240×240 square panel — see [Build variants](#build-variants) |
 | microSD card | FAT32 formatted, up to 32GB recommended |
 | LiPo battery | 3.7V, any capacity (JST connector) |
 | Adafruit DRV2605L breakout | Haptic driver + ERM vibration motor |
@@ -130,13 +130,29 @@ The name must match exactly what the device advertises over Bluetooth.
 
 ### 3. Build and flash
 
+#### Build variants
+
+The firmware supports two display configurations, selected by a compile-time flag:
+
+| Variant | Panel | Logical resolution | Build command |
+|---------|-------|--------------------|---------------|
+| **320-wide** (default) | 240×320 in landscape (rotation 3) | 320×240 | `pio run` |
+| **240-wide** | 240×240 square (rotation 0) | 240×240 | `pio run -e adafruit_feather_esp32_v2_240wide` |
+
+The 240-wide variant adds `-DDISPLAY_240WIDE` which adjusts `SCREEN_WIDTH`, the LGFX panel configuration, display rotation, and the Now Playing album art layout to fit the narrower screen. All other behaviour (height-based layout, navigation, audio) is identical.
+
+> **Note for 240-wide:** `setRotation(0)` is the expected default for most 240×240 ST7789 modules, but some mount the connector differently — if the display appears rotated, try `setRotation(1)`, `(2)`, or `(3)` in `initDisplay()`. Some modules also require `cfg.offset_y = 80` if a blank strip appears at the top of the screen.
+
 ```bash
 # Clone the repo
 git clone <repo-url>
 cd esp32-audio-player-test
 
-# Build and upload (with board connected via USB)
+# Build and upload — 320-wide (default hardware)
 pio run --target upload
+
+# Build and upload — 240-wide square panel
+pio run -e adafruit_feather_esp32_v2_240wide --target upload
 
 # Monitor serial output
 pio device monitor

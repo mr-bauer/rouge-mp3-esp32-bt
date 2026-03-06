@@ -197,14 +197,18 @@ void initDisplay()
 
   // LovyanGFX handles SPI init, reset sequence, and backlight PWM internally
   display.init();
-  display.setRotation(3);
+#ifdef DISPLAY_240WIDE
+  display.setRotation(2);  // Square 240x240 panel — adjust (1/2/3) if orientation is wrong
+#else
+  display.setRotation(3);  // 240x320 panel in landscape
+#endif
   display.fillScreen(COLOR_BG);
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
 
   Serial.println("✅ Display initialized");
 
-  // Allocate full-screen sprite in PSRAM (~150KB at 16bpp for 320x240)
+  // Allocate full-screen sprite in PSRAM (~150KB for 320x240; ~112KB for 240x240)
   // Must call setPsram(true) — LGFX_Sprite defaults to DMA (internal) allocation
   // which cannot fit 115KB. setPsram(true) uses MALLOC_CAP_SPIRAM with DMA fallback.
   sprite.setColorDepth(16);
@@ -394,7 +398,7 @@ void drawControlBar(int centerY, const char* label, int value, int maxValue,
   centerY += 40;
 
   // Bar
-  int barWidth = 200;
+  int barWidth = SCREEN_WIDTH - 120;  // 200px at 320-wide, 120px at 240-wide
   int barHeight = 20;
   int barX = (SCREEN_WIDTH - barWidth) / 2;
   int barY = centerY;
@@ -575,9 +579,12 @@ void drawHomeScreen(int selectedIdx) {
     // Selection border — 3px thick rounded rect around the zone
     if (selected) {
       uint16_t borderColor = enabled ? COLOR_SELECTED : 0x02E0;  // green or dark green
-      int bx = ZONE_W * i + 4;
+      // At 240-wide the zone is only 60px and the icon is 50px, so use a 1px margin
+      // to keep the icon inside the 3px-thick border. At 320-wide use 4px margin.
+      int margin = (ZONE_W <= 64) ? 1 : 4;
+      int bx = ZONE_W * i + margin;
       int by = BOX_TOP;
-      int bw = ZONE_W - 8;
+      int bw = ZONE_W - margin * 2;
       int bh = BOX_BOTTOM - BOX_TOP;
       sprite.drawRoundRect(bx,     by,     bw,     bh,     8, borderColor);
       sprite.drawRoundRect(bx + 1, by + 1, bw - 2, bh - 2, 7, borderColor);
@@ -666,6 +673,13 @@ static void drawAlphaScrollOverlay() {
 }
 
 void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
+  // Alpha-jump overlay-only mode: letter changed but list doesn't need a full redraw
+  if (fastScrollActive && alphaOverlayOnly) {
+    alphaOverlayOnly = false;
+    drawAlphaScrollOverlay();  // fillRoundRect self-erases old overlay before drawing new letter
+    return;
+  }
+
   int listSize = 0;
   int arrayIndex = 0;
   const char* subheader = nullptr;
@@ -897,11 +911,21 @@ void updateNowPlayingScreen() {
 
   if (albumArtAvailable) {
     // Side-by-side layout: art on left, text on right
+    // 320-wide: 130px art → 160px text area
+    // 240-wide:  90px art → 129px text area
+#ifdef DISPLAY_240WIDE
+    const int ART_SIZE = 90;
+    const int ART_X    = 5;
+    const int ART_Y    = 55;
+    const int TEXT_X   = ART_X + ART_SIZE + 8;   // 103
+    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8; // 129px
+#else
     const int ART_SIZE = 130;
     const int ART_X    = 10;
     const int ART_Y    = 55;
     const int TEXT_X   = ART_X + ART_SIZE + 12;  // 152
-    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8;  // 160px
+    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8; // 160px
+#endif
 
     sprite.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, COLOR_BG);
     drawAlbumArt(ART_X, ART_Y, ART_SIZE);

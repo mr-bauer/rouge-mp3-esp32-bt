@@ -12,6 +12,7 @@ static void savePlayingContext() {
   playingArtistIndex = artistIndex;
   playingArtist      = currentArtist;
   playingAlbum       = currentAlbum;
+  rougePrefs.saveLastPlayed(artistIndex, albumIndex, songIndex, currentArtist, currentAlbum);
 }
 
 void handleButtonPress(int buttonIndex)
@@ -118,6 +119,16 @@ void handleCenter()
           Serial.printf("🎨 Theme changed to: %s\n", themeIndex == 0 ? "Dark" : "Light");
           applyTheme(themeIndex);
           rougePrefs.saveTheme(themeIndex);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }
+
+        if (item.label.find("Resume on Boot:") == 0) {
+          resumeOnBoot = !resumeOnBoot;
+          rougePrefs.saveResumeOnBoot(resumeOnBoot);
           buildSettingsMenu();
           forceDisplayRedraw = true;
           displayNeedsUpdate = true;

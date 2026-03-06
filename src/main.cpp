@@ -94,6 +94,27 @@ void setup()
         return;
     }
 
+    // Restore last-played position
+    resumeOnBoot = rougePrefs.loadResumeOnBoot();
+    if (resumeOnBoot) {
+        rougePrefs.loadLastPlayed(playingArtistIndex, playingAlbumIndex, playingSongIndex,
+                                   playingArtist, playingAlbum);
+        if (!playingArtist.empty()) {
+            Serial.printf("💾 Restored last played: %s / %s / song %d\n",
+                          playingArtist.c_str(), playingAlbum.c_str(), playingSongIndex);
+            // Restore browse state so Play button works immediately on boot
+            currentArtist = playingArtist;
+            currentAlbum  = playingAlbum;
+            artistIndex   = playingArtistIndex;
+            if (buildAlbumList(playingArtist)) {
+                albumIndex = playingAlbumIndex;
+                if (buildSongList(playingArtist, playingAlbum)) {
+                    songIndex = playingSongIndex;
+                }
+            }
+        }
+    }
+
     // Stop loading animation
     stopLoadingAnimation();
     delay(200);

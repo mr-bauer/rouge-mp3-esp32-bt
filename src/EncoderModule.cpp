@@ -77,8 +77,10 @@ static void handleFastScrollList(volatile int& listIndex, int listSize, int step
       && fastScrollTickCount >= FAST_SCROLL_TRIGGER_TICKS
       && listSize >= FAST_SCROLL_MIN_LIST
       && !alphaIndex.empty()) {
-    fastScrollActive = true;
+    fastScrollActive   = true;
+    fastScrollLastStep = now;   // delay first alpha step so initial full render fires first
     initFastScrollPosition(listIndex);
+    displayNeedsUpdate = true;  // trigger that initial full render (list + overlay)
   }
 
   if (fastScrollActive && !alphaIndex.empty()) {
@@ -89,6 +91,7 @@ static void handleFastScrollList(volatile int& listIndex, int listSize, int step
       fastScrollLastStep = now;
       listIndex          = alphaIndex[fastScrollAlphaIdx].firstIndex;
       fastScrollLetter   = alphaIndex[fastScrollAlphaIdx].letter;
+      alphaOverlayOnly   = true;  // subsequent renders skip list, update overlay only
       displayNeedsUpdate = true;
     }
   } else {

@@ -33,8 +33,8 @@
 
 | Feature | Details |
 |---|---|
-| ST7789 240×240 TFT display | Driven via HSPI at 60 MHz using LovyanGFX |
-| Flicker-free sprite rendering | Full-screen 240×240 sprite in PSRAM; entire frame composed off-screen then DMA-pushed in one burst |
+| ST7789 TFT display | Driven via HSPI at 60 MHz using LovyanGFX; supports 240×320 panel in landscape (320×240 logical, default) and 240×240 square panel — selected at compile time via `-DDISPLAY_240WIDE` |
+| Flicker-free sprite rendering | Full-screen sprite in PSRAM (~150 KB for 320-wide, ~112 KB for 240-wide); entire frame composed off-screen then DMA-pushed in one burst |
 | Loading spinner | Animated dot-ring spinner runs on a FreeRTOS task during startup |
 | Now Playing screen | Shows current artist, album, song title, and album art |
 | JPEG album art | Parses ID3v2 APIC frames from MP3 files and `covr` box data from M4A files; renders via TJpg_Decoder into the sprite |

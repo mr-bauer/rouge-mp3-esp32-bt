@@ -188,6 +188,49 @@ int RougePreferences::loadTheme() {
     return (theme == 0 || theme == 1) ? (int)theme : 0;
 }
 
+// Last-played position
+void RougePreferences::saveLastPlayed(int artistIdx, int albumIdx, int songIdx,
+                                       const std::string& artist, const std::string& album) {
+    if (!isOpen) return;
+    nvs_set_i32(nvsHandle, "lastArtIdx", artistIdx);
+    nvs_set_i32(nvsHandle, "lastAlbIdx", albumIdx);
+    nvs_set_i32(nvsHandle, "lastSngIdx", songIdx);
+    nvs_set_str(nvsHandle, "lastArtist", artist.c_str());
+    nvs_set_str(nvsHandle, "lastAlbum",  album.c_str());
+    nvs_commit(nvsHandle);
+}
+
+void RougePreferences::loadLastPlayed(int& artistIdx, int& albumIdx, int& songIdx,
+                                       std::string& artist, std::string& album) {
+    if (!isOpen) return;
+    int32_t ai = 0, ali = 0, si = 0;
+    nvs_get_i32(nvsHandle, "lastArtIdx", &ai);
+    nvs_get_i32(nvsHandle, "lastAlbIdx", &ali);
+    nvs_get_i32(nvsHandle, "lastSngIdx", &si);
+    artistIdx = (int)ai;
+    albumIdx  = (int)ali;
+    songIdx   = (int)si;
+    char buf[128] = {};
+    size_t len = sizeof(buf);
+    if (nvs_get_str(nvsHandle, "lastArtist", buf, &len) == ESP_OK) artist = buf;
+    len = sizeof(buf);
+    if (nvs_get_str(nvsHandle, "lastAlbum",  buf, &len) == ESP_OK) album  = buf;
+}
+
+// Resume on boot toggle
+void RougePreferences::saveResumeOnBoot(bool enabled) {
+    if (!isOpen) return;
+    nvs_set_i32(nvsHandle, "resumeOnBoot", enabled ? 1 : 0);
+    nvs_commit(nvsHandle);
+}
+
+bool RougePreferences::loadResumeOnBoot() {
+    if (!isOpen) return true;
+    int32_t val = 1;
+    nvs_get_i32(nvsHandle, "resumeOnBoot", &val);
+    return val != 0;
+}
+
 // BT device name functions
 void RougePreferences::saveBTDevice(const char* name) {
     if (!isOpen || !name) return;

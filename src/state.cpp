@@ -68,6 +68,7 @@ volatile unsigned long pauseStartMillis    = 0;
 bool forceDisplayRedraw = false;
 int textSizePreference = 2;  // 1=small (6x8px), 2=medium (DejaVu12), 3=large (12x16px)
 int themeIndex = 0;           // 0 = dark, 1 = light
+bool resumeOnBoot = true;
 bool albumArtAvailable = false;
 
 // Alpha fast-scroll
@@ -77,6 +78,7 @@ char          fastScrollLetter   = 'A';
 int           fastScrollAlphaIdx = 0;
 unsigned long fastScrollLastTick = 0;
 unsigned long fastScrollLastStep = 0;
+bool          alphaOverlayOnly   = false;
 
 void buildAlphaIndex(MenuType menu) {
   alphaIndex.clear();
@@ -139,6 +141,9 @@ void buildSettingsMenu() {
     MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem(
     themeIndex == 0 ? "Theme: Dark" : "Theme: Light",
+    MENU_SETTINGS));
+  currentMenuItems.push_back(MenuItem(
+    resumeOnBoot ? "Resume on Boot: On" : "Resume on Boot: Off",
     MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Shuffle: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Repeat: Off", MENU_SETTINGS));

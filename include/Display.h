@@ -4,9 +4,15 @@
 #include <LovyanGFX.hpp>
 #include "State.h"
 
-// Display dimensions (visual, after rotation 3 — 240x320 panel in landscape)
-#define SCREEN_WIDTH  320
+// Display dimensions — selected by build flag (-DDISPLAY_240WIDE for square panel)
+// 320-wide (default): 240x320 panel in landscape via setRotation(3) → 320×240
+// 240-wide:           240x240 panel, setRotation(0) → 240×240
 #define SCREEN_HEIGHT 240
+#ifdef DISPLAY_240WIDE
+  #define SCREEN_WIDTH  240
+#else
+  #define SCREEN_WIDTH  320
+#endif
 
 // HSPI pins for display
 #define TFT_CS    15
@@ -21,7 +27,9 @@
 #define BL_PWM_FREQ 5000
 #define BL_PWM_RESOLUTION 8  // 8-bit (0-255)
 
-// LovyanGFX display driver configuration for ST7789 240x320 on HSPI (rotation 3 → 320x240 landscape)
+// LovyanGFX display driver configuration for ST7789 on HSPI
+// 320-wide (default): 240x320 panel, rotation 3 → 320x240 landscape
+// 240-wide:           240x240 panel, rotation 0 (adjust if physical mounting differs)
 class LGFX : public lgfx::LGFX_Device {
     lgfx::Panel_ST7789 _panel_instance;
     lgfx::Bus_SPI      _bus_instance;
@@ -48,8 +56,12 @@ public:
           cfg.pin_busy  = -1;
           cfg.memory_width  = 240;   // ST7789 physical memory width (always 240)
           cfg.memory_height = 320;   // ST7789 physical memory height (always 320)
-          cfg.panel_width   = 240;   // Physical panel width
-          cfg.panel_height  = 320;   // Physical panel height (240x320 panel)
+          cfg.panel_width   = 240;
+#ifdef DISPLAY_240WIDE
+          cfg.panel_height  = 240;   // Square 240x240 panel
+#else
+          cfg.panel_height  = 320;   // 240x320 panel (landscape via rotation 3)
+#endif
           cfg.offset_x = 0; cfg.offset_y = 0; cfg.offset_rotation = 0;
           cfg.dummy_read_pixel = 8; cfg.dummy_read_bits = 1;
           cfg.readable   = false;
