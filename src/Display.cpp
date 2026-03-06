@@ -32,6 +32,7 @@ static int targetBrightness = -1;  // -1 = uninitialized
 // Set true by the 1s progress tick — updateNowPlayingScreen() skips JPEG
 // decode and only repaints the bottom progress-bar strip
 static bool nowPlayingProgressOnly = false;
+static int  scanAnimFrame          = 0;   // 0-5 spinner dot index
 
 // ============================================================================
 // COLOR THEME GLOBALS
@@ -156,11 +157,12 @@ void displayTask(void *param) {
       displayNeedsUpdate = true;
     }
 
-    // Tick BT scan header animation every 500 ms while scanning
+    // Tick BT scan spinner animation every 150 ms while scanning
     static unsigned long lastScanTick = 0;
     if (btScanning && currentMenu == MENU_BT_SCAN) {
-      if (now - lastScanTick >= 500) {
+      if (now - lastScanTick >= 150) {
         lastScanTick = now;
+        scanAnimFrame = (scanAnimFrame + 1) % 6;
         displayNeedsUpdate = true;
       }
     }
@@ -672,6 +674,54 @@ static void drawAlphaScrollOverlay() {
   sprite.setTextColor(COLOR_TEXT);
 }
 
+// BT scan spinner overlay — drawn on top of the (building) device list while scanning.
+// 6 orbiting dots with a 3-dot trailing tail; "Searching..." label; found-device count.
+static void drawBTScanOverlay() {
+  const int OW = 110, OH = 90;
+  const int OX = (SCREEN_WIDTH  - OW) / 2;
+  const int OY = UI_HEADER_HEIGHT + (SCREEN_HEIGHT - UI_HEADER_HEIGHT - OH) / 2;
+  const int CX = OX + OW / 2;
+  const int CY = OY + OH / 2 - 8;   // shift dot ring up slightly to leave room for label
+  const int R  = 20;                 // orbit radius
+
+  // 6 dot offsets (integer, radius 20, starting at top, clockwise)
+  static const int DX[6] = {  0,  17,  17,   0, -17, -17 };
+  static const int DY[6] = { -20, -10,  10,  20,  10, -10 };
+  static const int DOT_R[4] = { 5, 4, 3, 2 };  // sizes: head, tail1, tail2, tail3
+
+  sprite.fillRoundRect(OX, OY, OW, OH, 10, COLOR_SELECTED);
+  sprite.drawRoundRect(OX, OY, OW, OH, 10, COLOR_TEXT);
+
+  // Draw dim base dots first
+  for (int i = 0; i < 6; i++) {
+    sprite.fillCircle(CX + DX[i], CY + DY[i], 2, COLOR_BG);
+  }
+
+  // Draw trailing tail (3 dots behind head, decreasing size/brightness)
+  for (int t = 3; t >= 1; t--) {
+    int i = ((scanAnimFrame - t) + 6) % 6;
+    sprite.fillCircle(CX + DX[i], CY + DY[i], DOT_R[t], COLOR_DISABLED);
+  }
+  // Draw head (brightest, largest)
+  sprite.fillCircle(CX + DX[scanAnimFrame], CY + DY[scanAnimFrame], DOT_R[0], COLOR_BG);
+
+  // "Searching..." label
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_BG);
+  drawCenteredText(sprite, "Searching...", OY + OH - 18, 1);
+
+  // Device count at bottom
+  if (!btFoundDevices.empty()) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d found", (int)btFoundDevices.size());
+    sprite.setTextSize(1);
+    drawCenteredText(sprite, buf, OY + OH - 8, 1);
+  }
+
+  sprite.setTextColor(COLOR_TEXT);
+}
+
 void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
   // Alpha-jump overlay-only mode: letter changed but list doesn't need a full redraw
   if (fastScrollActive && alphaOverlayOnly) {
@@ -882,6 +932,26 @@ static void drawTimeLabels(unsigned long elapsed, int duration) {
   sprite.setTextColor(COLOR_TEXT);
 }
 
+// Draws a small shuffle-mode indicator centered below the time labels.
+static void drawShuffleIndicator() {
+  const int y = NP_BAR_Y + NP_BAR_H + 18;  // below time labels (~y=222)
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  if (shuffleMode == 0) {
+    // Erase any previous indicator
+    sprite.fillRect(0, y, SCREEN_WIDTH, SCREEN_HEIGHT - y, COLOR_BG);
+    return;
+  }
+  const char* label = (shuffleMode == 1) ? "SHUF:SONG" : "SHUF:ALL";
+  int tw = sprite.textWidth(label);
+  sprite.fillRect(0, y, SCREEN_WIDTH, SCREEN_HEIGHT - y, COLOR_BG);
+  int x = (SCREEN_WIDTH - tw) / 2;
+  sprite.setTextColor(COLOR_SELECTED);
+  sprite.setCursor(x, y);
+  sprite.print(label);
+  sprite.setTextColor(COLOR_TEXT);
+}
+
 void updateNowPlayingScreen() {
   // ── Fast path: 1s progress tick — only repaint the bottom strip ──────────
   // Avoids JPEG decode and full text redraw on every tick.
@@ -896,6 +966,7 @@ void updateNowPlayingScreen() {
 
     drawProgressBar(elapsed, duration);
     drawTimeLabels(elapsed, duration);
+    drawShuffleIndicator();
     return;
   }
   // ── Full redraw ───────────────────────────────────────────────────────────
@@ -999,6 +1070,7 @@ void updateNowPlayingScreen() {
   unsigned long elapsed = calcElapsedSeconds(duration);
   drawProgressBar(elapsed, duration);
   drawTimeLabels(elapsed, duration);
+  drawShuffleIndicator();
 }
 
 // ============================================================================
@@ -1076,6 +1148,10 @@ void updateDisplay()
   } else {
     // MENU_MUSIC, MENU_BLUETOOTH, MENU_BT_SCAN — all plain list menus
     updateMenuList(menu, idx, fullRedraw);
+    // Overlay spinner while BT scan is in progress
+    if (menu == MENU_BT_SCAN && btScanning) {
+      drawBTScanOverlay();
+    }
   }
 
   // Flush sprite to display via DMA in one operation — eliminates flicker

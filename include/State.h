@@ -54,6 +54,7 @@
 extern std::string btStatus;
 extern volatile bool btScanning;                  // true while BT inquiry is running
 extern std::vector<std::string> btFoundDevices;   // device names collected during scan
+extern std::vector<std::string> btSavedDevices;   // previously connected devices (NVS-persisted)
 
 // Menu system
 enum MenuType {
@@ -177,6 +178,7 @@ extern bool forceDisplayRedraw;
 extern int textSizePreference;  // 1 (small/6x8px) or 2 (large/12x16px)
 extern int themeIndex;          // 0 = dark, 1 = light
 extern bool resumeOnBoot;       // restore last-played position on power-up
+extern int  shuffleMode;        // 0=off, 1=song-level, 2=library-wide
 extern bool albumArtAvailable;
 
 // Alpha fast-scroll

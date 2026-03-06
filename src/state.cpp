@@ -6,6 +6,7 @@
 std::string btStatus = "BT Ready";
 volatile bool btScanning = false;
 std::vector<std::string> btFoundDevices;
+std::vector<std::string> btSavedDevices;
 
 // Menu state
 MenuType currentMenu = MENU_MAIN;
@@ -69,6 +70,7 @@ bool forceDisplayRedraw = false;
 int textSizePreference = 2;  // 1=small (6x8px), 2=medium (DejaVu12), 3=large (12x16px)
 int themeIndex = 0;           // 0 = dark, 1 = light
 bool resumeOnBoot = true;
+int  shuffleMode = 0;           // 0=off, 1=song-level, 2=library-wide
 bool albumArtAvailable = false;
 
 // Alpha fast-scroll
@@ -145,7 +147,9 @@ void buildSettingsMenu() {
   currentMenuItems.push_back(MenuItem(
     resumeOnBoot ? "Resume on Boot: On" : "Resume on Boot: Off",
     MENU_SETTINGS));
-  currentMenuItems.push_back(MenuItem("Shuffle: Off", MENU_SETTINGS));
+  currentMenuItems.push_back(MenuItem(
+    shuffleMode == 0 ? "Shuffle: Off" : (shuffleMode == 1 ? "Shuffle: Song" : "Shuffle: Library"),
+    MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Repeat: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("About", MENU_SETTINGS));
   menuIndex = 0;
@@ -154,14 +158,21 @@ void buildSettingsMenu() {
 void buildBluetoothMenu() {
   currentMenuItems.clear();
 
-  if (bluetoothConnected) {
-    currentMenuItems.push_back(MenuItem("Status: Connected", MENU_BLUETOOTH));
+  // Status row (not selectable)
+  currentMenuItems.push_back(MenuItem(
+    bluetoothConnected ? "Status: Connected" : "Status: Disconnected",
+    MENU_BLUETOOTH, false));
+
+  // Disconnect only when connected
+  if (bluetoothConnected)
     currentMenuItems.push_back(MenuItem("Disconnect", MENU_BLUETOOTH));
-  } else {
-    currentMenuItems.push_back(MenuItem("Status: Disconnected", MENU_BLUETOOTH));
-    currentMenuItems.push_back(MenuItem("Reconnect", MENU_BLUETOOTH));
-  }
-  currentMenuItems.push_back(MenuItem("Scan Devices", MENU_BT_SCAN));
+
+  // Previously connected devices
+  for (const auto& name : btSavedDevices)
+    currentMenuItems.push_back(MenuItem(name.c_str(), MENU_BLUETOOTH));
+
+  // Scan for new devices
+  currentMenuItems.push_back(MenuItem("Scan for New...", MENU_BT_SCAN));
 
   menuIndex = 0;
 }

@@ -5,6 +5,7 @@
 #include "State.h"
 #include "Haptics.h"
 #include "Preferences.h"
+#include <esp_random.h>
 
 static void savePlayingContext() {
   playingSongIndex   = songIndex;
@@ -61,23 +62,21 @@ void handleCenter()
       
       // Handle Bluetooth menu actions
       if (currentMenu == MENU_BLUETOOTH) {
-        if (item.label == "Reconnect") {
-          Serial.println("User requested Bluetooth reconnect");
-          reconnectBluetooth();
-          buildBluetoothMenu();
-          displayNeedsUpdate = true;
-        } else if (item.label == "Disconnect") {
+        if (item.label == "Disconnect") {
           Serial.println("User requested Bluetooth disconnect");
           disconnectBluetooth();
           buildBluetoothMenu();
           displayNeedsUpdate = true;
         } else if (item.action == MENU_BT_SCAN) {
-          // "Scan Devices" — start scan and navigate to scan screen
+          // "Scan for New..." — start scan and navigate to scan screen
           startBTScan();
           navigateToMenu(MENU_BT_SCAN);
           displayNeedsUpdate = true;
-        } else if (item.label.find("Status:") != 0) {
-          navigateToMenu(item.action);
+        } else if (item.enabled) {
+          // Any enabled item that isn't Disconnect or Scan is a saved device
+          Serial.printf("User selected saved BT device: %s\n", item.label.c_str());
+          changeBluetoothDevice(String(item.label.c_str()));
+          buildBluetoothMenu();
           displayNeedsUpdate = true;
         }
         return;
@@ -136,6 +135,17 @@ void handleCenter()
           return;
         }
 
+        if (item.label.find("Shuffle:") == 0) {
+          shuffleMode = (shuffleMode + 1) % 3;  // cycles 0→1→2→0
+          Serial.printf("🔀 Shuffle mode: %d\n", shuffleMode);
+          rougePrefs.saveShuffle(shuffleMode);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }
+
         return;
       }
       
@@ -146,9 +156,13 @@ void handleCenter()
     return;
   }
   
-  // In Now Playing, Center does nothing (Play/Pause is Bottom button now)
+  // In Now Playing, Center cycles shuffle mode
   if (currentMenu == MENU_NOW_PLAYING) {
-    Serial.println("Center button - no action in Now Playing (use Bottom for Play/Pause)");
+    shuffleMode = (shuffleMode + 1) % 3;
+    Serial.printf("🔀 Shuffle mode (now playing): %d\n", shuffleMode);
+    rougePrefs.saveShuffle(shuffleMode);
+    hapticSelection();
+    displayNeedsUpdate = true;
     return;
   }
   
@@ -339,6 +353,49 @@ static void navigateInDirection(int dir)
 {
   const bool goForward = (dir > 0);
   const char* label = goForward ? "next" : "previous";
+
+  // --- Shuffle mode ---
+  if (shuffleMode == 1 && goForward) {
+    // Song-level: random song within the currently playing album
+    if (playingArtist != currentArtist || playingAlbum != currentAlbum) {
+      artistIndex   = playingArtistIndex;
+      currentArtist = playingArtist;
+      buildAlbumList(currentArtist);
+      albumIndex    = playingAlbumIndex;
+      currentAlbum  = playingAlbum;
+      buildSongList(currentArtist, currentAlbum);
+    }
+    if (!songs.empty()) {
+      songIndex        = (int)(esp_random() % (uint32_t)songs.size());
+      playingSongIndex = songIndex;
+      playCurrentSong(true);
+      displayNeedsUpdate = true;
+      Serial.printf("🔀 Shuffle song: %d/%d\n", songIndex, (int)songs.size());
+    }
+    return;
+  }
+
+  if (shuffleMode == 2 && goForward) {
+    // Library-wide: random artist → random album → random song
+    if (!artists.empty()) {
+      artistIndex   = (int)(esp_random() % (uint32_t)artists.size());
+      currentArtist = artists[artistIndex];
+      if (buildAlbumList(currentArtist) && !albums.empty()) {
+        albumIndex   = (int)(esp_random() % (uint32_t)albums.size());
+        currentAlbum = albums[albumIndex];
+        if (buildSongList(currentArtist, currentAlbum) && !songs.empty()) {
+          songIndex = (int)(esp_random() % (uint32_t)songs.size());
+          savePlayingContext();
+          playCurrentSong(true);
+          displayNeedsUpdate = true;
+          Serial.printf("🔀 Shuffle library: artist %d, album %d, song %d\n",
+                        artistIndex, albumIndex, songIndex);
+          return;
+        }
+      }
+    }
+    // Fallback to sequential if random pick failed
+  }
 
   // Restore playing context if the user has browsed to a different artist/album
   if (playingArtist != currentArtist || playingAlbum != currentAlbum) {

@@ -40,6 +40,10 @@ void setup()
     Serial.printf("💾 Loaded text size: %d\n", textSizePreference);
     themeIndex = rougePrefs.loadTheme();
     Serial.printf("💾 Loaded theme: %d\n", themeIndex);
+    shuffleMode = rougePrefs.loadShuffle();
+    Serial.printf("💾 Loaded shuffle: %d\n", shuffleMode);
+    btSavedDevices = rougePrefs.loadBTDeviceList();
+    Serial.printf("💾 Loaded %d saved BT device(s)\n", (int)btSavedDevices.size());
 
     // Initialize hardware modules
     initDisplay();

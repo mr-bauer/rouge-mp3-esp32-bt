@@ -309,6 +309,7 @@ static void btDiscoveryModeCallback(esp_bt_gap_discovery_state_t discoveryMode) 
         a2dp.set_discovery_mode_callback(nullptr);
         if (currentMenu == MENU_BT_SCAN) {
             buildBTScanMenu();
+            forceDisplayRedraw = true;  // clear overlay, repaint full list
             displayNeedsUpdate = true;
         }
     }
@@ -358,8 +359,11 @@ void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
             Serial.println("CONNECTED");
             bluetoothConnected = true;
 
-            // Save connected device name to NVS for persistence across reboots
+            // Save to single-device key (backward compat) and saved list
             rougePrefs.saveBTDevice(last_device_name.c_str());
+            rougePrefs.addBTDevice(last_device_name.c_str());
+            btSavedDevices = rougePrefs.loadBTDeviceList();
+            buildBluetoothMenu();  // refresh so saved list is current if user is in BT menu
             Serial.printf("[BT] Connected to: %s\n", last_device_name.c_str());
             break;
             
@@ -533,13 +537,19 @@ void disconnectBluetooth() {
 void changeBluetoothDevice(const String& new_device_name) {
     Serial.printf("[BT] Changing device to: %s\n", new_device_name.c_str());
 
+    // Clear scan callbacks immediately so they don't interfere with connection
+    a2dp.set_ssid_callback(nullptr);
+    a2dp.set_discovery_mode_callback(nullptr);
+    btScanning = false;
+
     // Disconnect if connected
     if (bluetoothConnected) {
         disconnectBluetooth();
         delay(1000);  // Wait for clean disconnect
     }
 
-    // Update device name and connect
+    // Connect to new device — stack stays up, just start() with the new name.
+    // Scan callbacks were already cleared above so btScanCallback can't veto the connection.
     last_device_name = new_device_name;
     a2dp.start(last_device_name.c_str());
     Serial.println("[BT] Connecting to new device...");

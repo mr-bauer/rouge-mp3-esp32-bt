@@ -10,7 +10,9 @@ A hand-built portable audio player based on the Adafruit Feather ESP32 V2. Music
 - Supports MP3 and M4A (AAC) audio formats
 - Artist → Album → Song library browser backed by a SQLite database on the SD card
 - JPEG album art extracted from embedded ID3 tags, displayed in Now Playing
-- Adjustable volume, screen brightness, and text size — all persisted across power cycles
+- Adjustable volume, screen brightness, text size, theme, and shuffle mode — all persisted across power cycles
+- Shuffle mode: Off / Song-level (random within album) / Library-wide (random artist→album→song)
+- Remembers last-played position across power cycles; Play works immediately on reboot
 - Haptic feedback (DRV2605L) with distinct effects for scroll, select, back, and error
 - Battery monitoring with percentage and charging indicator in the status bar
 - Flicker-free display via LovyanGFX off-screen sprite rendering and DMA transfer
@@ -173,7 +175,7 @@ pio device monitor
 | Control | Action |
 |---------|--------|
 | Encoder rotate | Scroll through lists |
-| Center button | Select / confirm |
+| Center button | Select / confirm; cycles Shuffle mode on Now Playing screen |
 | Top button (tap) | Back / Menu |
 | Top button (hold) | Jump to Home menu |
 | Bottom button (tap) | Play / Pause |
@@ -196,11 +198,14 @@ pio device monitor
 
 All settings are saved to NVS flash and restored on every boot.
 
-| Setting | How to access | Range |
-|---------|--------------|-------|
+| Setting | How to access | Range / Options |
+|---------|--------------|-----------------|
 | Volume | From Now Playing, scroll encoder 6+ ticks | 0–100% |
 | Screen brightness | Settings → Brightness, then turn encoder | 0–255 |
-| Text size | Settings → Text Size (cycles Small → Medium → Large) | Small, Medium, or Large |
+| Text size | Settings → Text Size (cycles Small → Medium → Large) | Small, Medium, Large |
+| Theme | Settings → Theme | Dark, Light |
+| Shuffle | Settings → Shuffle, or Center button on Now Playing | Off, Song, Library |
+| Resume on boot | Settings → Resume on Boot | On, Off |
 
 ---
 
@@ -221,7 +226,7 @@ Rouge uses a two-tier architecture:
 | Audio | `src/AudioManager.cpp` | MP3 and M4A decode, Bluetooth A2DP source, volume control |
 | Database | `src/Database.cpp`, `src/Indexer.cpp` | SQLite queries, artist/album/song list population |
 | State | `src/state.cpp`, `include/State.h` | Global state, menu builders, navigation stack |
-| Preferences | `src/Preferences.cpp` | NVS save/load for volume, brightness, text size |
+| Preferences | `src/Preferences.cpp` | NVS save/load for volume, brightness, text size, theme, shuffle mode, resume-on-boot, and last-played position |
 | Battery | `src/Battery.cpp` | ADC voltage reading, LiPo discharge curve, charging detection |
 | Haptics | `src/Haptics.cpp` | DRV2605L haptic effect playback |
 | Album Art | `src/AlbumArt.cpp` | ID3v2 APIC frame parsing, JPEG decode into sprite |

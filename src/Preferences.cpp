@@ -231,6 +231,55 @@ bool RougePreferences::loadResumeOnBoot() {
     return val != 0;
 }
 
+// Shuffle mode
+void RougePreferences::saveShuffle(int mode) {
+    if (!isOpen) return;
+    nvs_set_i32(nvsHandle, "shuffle", mode);
+    nvs_commit(nvsHandle);
+}
+
+int RougePreferences::loadShuffle() {
+    if (!isOpen) return 0;
+    int32_t val = 0;
+    esp_err_t err = nvs_get_i32(nvsHandle, "shuffle", &val);
+    if (err != ESP_OK) return 0;
+    return (val >= 0 && val <= 2) ? (int)val : 0;
+}
+
+// BT saved device list (up to 5, most recent first)
+static const int BT_DEV_MAX = 5;
+static const char* BT_DEV_KEYS[BT_DEV_MAX] = { "btDev0", "btDev1", "btDev2", "btDev3", "btDev4" };
+
+void RougePreferences::addBTDevice(const std::string& name) {
+    if (!isOpen || name.empty()) return;
+    std::vector<std::string> list = loadBTDeviceList();
+    for (auto it = list.begin(); it != list.end(); ++it) {
+        if (*it == name) { list.erase(it); break; }
+    }
+    list.insert(list.begin(), name);
+    if ((int)list.size() > BT_DEV_MAX) list.resize(BT_DEV_MAX);
+    int32_t cnt = (int32_t)list.size();
+    nvs_set_i32(nvsHandle, "btDevCnt", cnt);
+    for (int i = 0; i < cnt; i++)
+        nvs_set_str(nvsHandle, BT_DEV_KEYS[i], list[i].c_str());
+    nvs_commit(nvsHandle);
+}
+
+std::vector<std::string> RougePreferences::loadBTDeviceList() {
+    std::vector<std::string> list;
+    if (!isOpen) return list;
+    int32_t cnt = 0;
+    nvs_get_i32(nvsHandle, "btDevCnt", &cnt);
+    if (cnt < 0 || cnt > BT_DEV_MAX) cnt = 0;
+    char buf[64] = {};
+    for (int i = 0; i < cnt; i++) {
+        size_t len = sizeof(buf);
+        if (nvs_get_str(nvsHandle, BT_DEV_KEYS[i], buf, &len) == ESP_OK && buf[0])
+            list.push_back(std::string(buf));
+    }
+    return list;
+}
+
 // BT device name functions
 void RougePreferences::saveBTDevice(const char* name) {
     if (!isOpen || !name) return;

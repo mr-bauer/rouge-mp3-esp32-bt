@@ -63,17 +63,19 @@
 
 | Feature | Details |
 |---|---|
-| NVS preferences | `RougePreferences` class stores volume, brightness, and text size across power cycles |
+| NVS preferences | `RougePreferences` class stores volume, brightness, text size, theme, shuffle mode, and last-played position across power cycles |
 | Watchdog timer | 30-second hardware watchdog prevents lockup |
 | FreeRTOS display task | Display runs on Core 0 at 50ms intervals; audio processing runs on Core 1 |
 | Display mutex | `displayMutex` protects the display bus between the spinner task and the main display task |
 | Auto-dim + screen-off | Dims to ~6% brightness after 30s of inactivity; turns screen fully off after 5 min if stopped/paused; smooth fade in/out; wakes on button press |
+| Resume on boot | Restores last-played artist/album/song position from NVS on startup so Play works immediately; toggleable in Settings |
+| Shuffle mode | Three modes: Off / Song-level (random within current album) / Library-wide (random artist→album→song); toggled from Settings or Center button on Now Playing; indicator shown on Now Playing screen; saved to NVS |
 
 ---
 
 ## Known Bugs
 
-None currently.
+- **Bluetooth reconnect after disconnect fails** — after manually disconnecting a device from the Bluetooth menu and then attempting to reconnect to it (via the saved device list), the connection attempt starts (`CONNECTING...`) but never completes (`CONNECTED` never fires). Root cause is not yet confirmed; suspected issue is that `a2dp.start(name)` called on an already-running-but-idle A2DP stack after a clean disconnect does not reliably re-initiate the connection on the ESP32-A2DP library. Workaround: power-cycle the player to reconnect. Previous attempted fix using `a2dp.end()` + `a2dp.start()` caused a different regression (stack never came back up after `end()`). Needs further investigation with serial logging to confirm exact failure point.
 
 ---
 
@@ -81,7 +83,7 @@ None currently.
 
 ### Stubbed / Placeholder Features (Already in UI, Not Yet Wired)
 
-- [ ] **Shuffle mode** — toggle exists in Settings menu (`Shuffle: Off`) but has no effect on playback; needs state var, NVS persistence, and randomized `autoNext()` path
+- [x] **Shuffle mode** — Off / Song-level / Library-wide; cycles via Settings "Shuffle:" item or Center button on Now Playing; indicator shown on Now Playing; persisted to NVS
 - [ ] **Repeat mode** — toggle exists in Settings menu (`Repeat: Off`) but has no effect; needs single-track and full-library repeat modes, wired into `autoNext()`
 - [ ] **Album browser** — "Albums" in Music menu navigates nowhere; intended to browse all albums across artists without picking an artist first
 - [ ] **All Songs browser** — "All Songs" in Music menu navigates nowhere; intended as a flat list of every song in the library
@@ -111,14 +113,16 @@ None currently.
 - [ ] **Scrolling song title** — long titles in Now Playing are truncated; a marquee scroll would show the full title
 - [ ] **Now Playing layout with album art** — currently art fills most of the screen; consider a compact layout showing art + title + artist + progress bar together
 - [ ] **Animated playback icon** — the play/pause triangle in the control bar could animate (pulsing or spinning) while buffering
+- [ ] **Button lock mode** — a button combination (e.g. double-tap Top, or hold Left+Right simultaneously) toggles a locked state that ignores all playback controls (play/pause, skip, volume); a lock icon overlay or header indicator shows when locked so the user knows why buttons aren't responding. When the screen is dimmed and locked, any button press should still wake the display to show the lock indicator rather than silently doing nothing. Unlock uses the same combination.
 
 ### Settings / Persistence
 
+- [ ] **Display off while playing** — the display already dims after 30s of inactivity, but does not fully turn off if music is still playing (current logic only turns off after 5 min when stopped/paused). Add a second timeout (e.g. 2–5 min of no input while playing) to cut the backlight to 0, saving the ~40–50mA backlight draw during long listening sessions without touching audio. Any button press wakes the screen. Configurable via a "Screen Off Timer" setting or reuse the existing dim/sleep timeout chain.
 - [ ] **True sleep mode (deep or light)** — blocked by IRAM overflow: both `esp_deep_sleep_start()` and `esp_light_sleep_start()` require ~3,640B of IRAM for their power-down sequence, but the firmware currently has only ~14 bytes of IRAM headroom (BT A2DP + coexist fills the 128KB IRAM segment). Screen-off mode is the current workaround (~40–50mA savings from backlight). To unlock true sleep: rebuild ESP-IDF SDK with `CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y` and `CONFIG_ESP32_WIFI_ENABLED=0` at the ESP-IDF level (note: adding these as `-D` PlatformIO build flags has no effect on pre-compiled Arduino framework libraries); or switch to ESP-IDF framework directly in PlatformIO.
 - [ ] **CPU frequency scaling** — call `setCpuFrequencyMhz(80)` when player is stopped/paused and screen is dimmed; restore to 240MHz on activity. Saves ~60mA (240→80MHz), zero IRAM cost. Integrate into `manageSleep()` in `Display.cpp` alongside the existing brightness logic.
 - [ ] **Disable WiFi** — call `WiFi.mode(WIFI_OFF)` in `setup()` since WiFi is never used. Saves ~333B IRAM (frees `libesp_wifi.a` + `libesp_phy.a`); `libcoexist.a` stays (required by BT stack). Negligible runtime power savings but cleans up dead code.
 - [ ] **Volume in Settings** — volume is encoder-activated from Now Playing, but not visible or adjustable from the Settings menu directly
-- [ ] **Restore last-played position** — remember `artistIndex`, `albumIndex`, `songIndex` across power cycles (save to NVS on track change)
+- [x] **Restore last-played position** — saves artist/album/song to NVS on every track change; restored on boot; browse state rebuilt so Play button works immediately; gated by "Resume on Boot" setting
 
 ### Infrastructure / Code Health
 
