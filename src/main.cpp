@@ -40,6 +40,10 @@ void setup()
     Serial.printf("💾 Loaded text size: %d\n", textSizePreference);
     themeIndex = rougePrefs.loadTheme();
     Serial.printf("💾 Loaded theme: %d\n", themeIndex);
+    shuffleMode = rougePrefs.loadShuffle();
+    Serial.printf("💾 Loaded shuffle: %d\n", shuffleMode);
+    btSavedDevices = rougePrefs.loadBTDeviceList();
+    Serial.printf("💾 Loaded %d saved BT device(s)\n", (int)btSavedDevices.size());
 
     // Initialize hardware modules
     initDisplay();
@@ -92,6 +96,27 @@ void setup()
         display.setTextColor(COLOR_TEXT);
         drawCenteredText(display, "No Artists", SCREEN_HEIGHT / 2);
         return;
+    }
+
+    // Restore last-played position
+    resumeOnBoot = rougePrefs.loadResumeOnBoot();
+    if (resumeOnBoot) {
+        rougePrefs.loadLastPlayed(playingArtistIndex, playingAlbumIndex, playingSongIndex,
+                                   playingArtist, playingAlbum);
+        if (!playingArtist.empty()) {
+            Serial.printf("💾 Restored last played: %s / %s / song %d\n",
+                          playingArtist.c_str(), playingAlbum.c_str(), playingSongIndex);
+            // Restore browse state so Play button works immediately on boot
+            currentArtist = playingArtist;
+            currentAlbum  = playingAlbum;
+            artistIndex   = playingArtistIndex;
+            if (buildAlbumList(playingArtist)) {
+                albumIndex = playingAlbumIndex;
+                if (buildSongList(playingArtist, playingAlbum)) {
+                    songIndex = playingSongIndex;
+                }
+            }
+        }
     }
 
     // Stop loading animation

@@ -3,11 +3,13 @@
 
 void handleButtonPress(int buttonIndex);
 void handleCenter();
-void handleTop();         // NEW - Menu/Back
-void handleBottom();      // NEW - Play/Pause
-void handleLeft();        // NEW - Previous track
-void handleRight();       // NEW - Next track
+void handleTop();
+void handleBottom();
+void handleLeft();
+void handleRight();
+void handleTopLongPress();     // Hold Top → jump to Home
+void handleBottomLongPress();  // Hold Bottom → jump to Now Playing
 void autoNext();
-void autoPrevious();      // NEW - Go to previous track
+void autoPrevious();
 
 #endif

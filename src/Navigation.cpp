@@ -5,6 +5,16 @@
 #include "State.h"
 #include "Haptics.h"
 #include "Preferences.h"
+#include <esp_random.h>
+
+static void savePlayingContext() {
+  playingSongIndex   = songIndex;
+  playingAlbumIndex  = albumIndex;
+  playingArtistIndex = artistIndex;
+  playingArtist      = currentArtist;
+  playingAlbum       = currentAlbum;
+  rougePrefs.saveLastPlayed(artistIndex, albumIndex, songIndex, currentArtist, currentAlbum);
+}
 
 void handleButtonPress(int buttonIndex)
 {
@@ -34,8 +44,9 @@ void handleButtonPress(int buttonIndex)
 void handleCenter()
 {
   // Handle menu selections
-  if (currentMenu == MENU_MAIN || currentMenu == MENU_MUSIC || 
-      currentMenu == MENU_SETTINGS || currentMenu == MENU_BLUETOOTH)
+  if (currentMenu == MENU_MAIN || currentMenu == MENU_MUSIC ||
+      currentMenu == MENU_SETTINGS || currentMenu == MENU_BLUETOOTH ||
+      currentMenu == MENU_BT_SCAN)
   {
     if (menuIndex >= 0 && menuIndex < (int)currentMenuItems.size()) {
       MenuItem& item = currentMenuItems[menuIndex];
@@ -52,20 +63,34 @@ void handleCenter()
       
       // Handle Bluetooth menu actions
       if (currentMenu == MENU_BLUETOOTH) {
-        if (item.label == "Reconnect") {
-          Serial.println("User requested Bluetooth reconnect");
-          reconnectBluetooth();
-        } else if (item.label == "Disconnect") {
+        if (item.label == "Disconnect") {
           Serial.println("User requested Bluetooth disconnect");
           disconnectBluetooth();
+          buildBluetoothMenu();
+          displayNeedsUpdate = true;
+        } else if (item.action == MENU_BT_SCAN) {
+          // "Scan for New..." — start scan and navigate to scan screen
+          startBTScan();
+          navigateToMenu(MENU_BT_SCAN);
+          displayNeedsUpdate = true;
+        } else if (item.enabled) {
+          // Any enabled item that isn't Disconnect or Scan is a saved device
+          Serial.printf("User selected saved BT device: %s\n", item.label.c_str());
+          changeBluetoothDevice(String(item.label.c_str()));
+          buildBluetoothMenu();
+          displayNeedsUpdate = true;
         }
-        
-        if (item.label.find("Status:") == 0) {
-          return;
-        }
-        
-        buildBluetoothMenu();
+        return;
+      }
+
+      // Handle BT scan results
+      if (currentMenu == MENU_BT_SCAN) {
+        if (!item.enabled) return;  // "Scanning..." or "No devices found" — not selectable
+        Serial.printf("User selected BT device: %s\n", item.label.c_str());
+        changeBluetoothDevice(String(item.label.c_str()));
+        navigateBack();
         displayNeedsUpdate = true;
+        return;
       }
       
       if (currentMenu == MENU_SETTINGS) {
@@ -79,7 +104,7 @@ void handleCenter()
         }
 
         if (item.label.find("Text Size:") == 0) {
-          textSizePreference = (textSizePreference == 1) ? 2 : 1;
+          textSizePreference = (textSizePreference % 3) + 1;  // cycles 1→2→3→1
           Serial.printf("🔤 Text size changed to: %d\n", textSizePreference);
           rougePrefs.saveTextSize(textSizePreference);
           buildSettingsMenu();
@@ -101,6 +126,27 @@ void handleCenter()
           return;
         }
 
+        if (item.label.find("Resume on Boot:") == 0) {
+          resumeOnBoot = !resumeOnBoot;
+          rougePrefs.saveResumeOnBoot(resumeOnBoot);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }
+
+        if (item.label.find("Shuffle:") == 0) {
+          shuffleMode = (shuffleMode + 1) % 3;  // cycles 0→1→2→0
+          Serial.printf("🔀 Shuffle mode: %d\n", shuffleMode);
+          rougePrefs.saveShuffle(shuffleMode);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          hapticSelection();
+          return;
+        }
+
         return;
       }
       
@@ -111,9 +157,13 @@ void handleCenter()
     return;
   }
   
-  // In Now Playing, Center does nothing (Play/Pause is Bottom button now)
+  // In Now Playing, Center cycles shuffle mode
   if (currentMenu == MENU_NOW_PLAYING) {
-    Serial.println("Center button - no action in Now Playing (use Bottom for Play/Pause)");
+    shuffleMode = (shuffleMode + 1) % 3;
+    Serial.printf("🔀 Shuffle mode (now playing): %d\n", shuffleMode);
+    rougePrefs.saveShuffle(shuffleMode);
+    hapticSelection();
+    displayNeedsUpdate = true;
     return;
   }
   
@@ -126,6 +176,7 @@ void handleCenter()
       hapticSelection();
       
       if (buildAlbumList(currentArtist)) {
+        buildAlphaIndex(MENU_ALBUM_LIST);
         navigateToMenu(MENU_ALBUM_LIST);
         albumIndex = 0;
       } else {
@@ -144,6 +195,7 @@ void handleCenter()
       hapticSelection();
       
       if (buildSongList(currentArtist, currentAlbum)) {
+        buildAlphaIndex(MENU_SONG_LIST);
         navigateToMenu(MENU_SONG_LIST);
         songIndex = 0;
       } else {
@@ -181,7 +233,10 @@ void handleCenter()
           stopPlayback();  // This properly stops and resets everything
           delay(100);      // Give it time to clean up
         }
-        
+
+        // Save playing context so autoNext/autoPrevious advance from this position
+        savePlayingContext();
+
         Serial.println("Starting new song");
         playCurrentSong(false);
         navigateToMenu(MENU_NOW_PLAYING);
@@ -230,6 +285,8 @@ void handleBottom()
   } else if (player_state == STATE_STOPPED) {
     // If stopped and we have songs, start playing
     if (!songs.empty()) {
+      // Save playing context so autoNext advances from this position
+      savePlayingContext();
       startPlayback();
       hapticSelection();
       navigateToMenu(MENU_NOW_PLAYING);
@@ -270,198 +327,208 @@ void handleRight()
   }
 }
 
-void autoPrevious()
+void handleTopLongPress()
 {
-  Serial.println("Going to previous track...");
+  // Long press Top → jump to Home (main menu), clearing nav stack
+  Serial.println("🏠 Top LONG PRESS → Home");
+  hapticBack();
+  fastScrollActive = false;
+  menuStack.clear();
+  currentMenu = MENU_MAIN;
+  buildMainMenu();
+  menuIndex = 0;
+  forceDisplayRedraw = true;
+  displayNeedsUpdate = true;
+}
 
-  // Try previous song in current album
-  if (songIndex - 1 >= 0)
-  {
-    songIndex--;
-    playCurrentSong(true);
-    displayNeedsUpdate = true;
-    logRamSpace("auto previous - same album");
+void handleBottomLongPress()
+{
+  // Long press Bottom → jump to Now Playing
+  Serial.println("🎵 Bottom LONG PRESS → Now Playing");
+  hapticSelection();
+  navigateToMenu(MENU_NOW_PLAYING);
+  displayNeedsUpdate = true;
+}
+
+static void navigateInDirection(int dir)
+{
+  const bool goForward = (dir > 0);
+  const char* label = goForward ? "next" : "previous";
+
+  // --- Shuffle mode ---
+  if (shuffleMode == 1 && goForward) {
+    // Song-level: random song within the currently playing album
+    if (playingArtist != currentArtist || playingAlbum != currentAlbum) {
+      artistIndex   = playingArtistIndex;
+      currentArtist = playingArtist;
+      buildAlbumList(currentArtist);
+      albumIndex    = playingAlbumIndex;
+      currentAlbum  = playingAlbum;
+      buildSongList(currentArtist, currentAlbum);
+    }
+    if (!songs.empty()) {
+      songIndex        = (int)(esp_random() % (uint32_t)songs.size());
+      playingSongIndex = songIndex;
+      playCurrentSong(true);
+      displayNeedsUpdate = true;
+      Serial.printf("🔀 Shuffle song: %d/%d\n", songIndex, (int)songs.size());
+    }
     return;
   }
 
-  // Try previous album
-  if (albumIndex - 1 >= 0)
+  if (shuffleMode == 2 && goForward) {
+    // Library-wide: random artist → random album → random song
+    if (!artists.empty()) {
+      artistIndex   = (int)(esp_random() % (uint32_t)artists.size());
+      currentArtist = artists[artistIndex];
+      if (buildAlbumList(currentArtist) && !albums.empty()) {
+        albumIndex   = (int)(esp_random() % (uint32_t)albums.size());
+        currentAlbum = albums[albumIndex];
+        if (buildSongList(currentArtist, currentAlbum) && !songs.empty()) {
+          songIndex = (int)(esp_random() % (uint32_t)songs.size());
+          savePlayingContext();
+          playCurrentSong(true);
+          displayNeedsUpdate = true;
+          Serial.printf("🔀 Shuffle library: artist %d, album %d, song %d\n",
+                        artistIndex, albumIndex, songIndex);
+          return;
+        }
+      }
+    }
+    // Fallback to sequential if random pick failed
+  }
+
+  // Restore playing context if the user has browsed to a different artist/album
+  if (playingArtist != currentArtist || playingAlbum != currentAlbum) {
+    Serial.printf("📀 Restoring playing context before auto-%s\n", label);
+    artistIndex   = playingArtistIndex;
+    currentArtist = playingArtist;
+    buildAlbumList(currentArtist);
+    albumIndex    = playingAlbumIndex;
+    currentAlbum  = playingAlbum;
+    buildSongList(currentArtist, currentAlbum);
+  }
+  songIndex = playingSongIndex;
+
+  // Try next/previous song in current album
+  int nextSong = songIndex + dir;
+  if (nextSong >= 0 && nextSong < (int)songs.size())
   {
-    albumIndex--;
-    
+    songIndex        = nextSong;
+    playingSongIndex = songIndex;
+    playCurrentSong(true);
+    displayNeedsUpdate = true;
+    logRamSpace(goForward ? "auto next - same album" : "auto previous - same album");
+    return;
+  }
+
+  // Try next/previous album
+  int nextAlbum = albumIndex + dir;
+  if (nextAlbum >= 0 && nextAlbum < (int)albums.size())
+  {
+    albumIndex   = nextAlbum;
+    if (goForward) songIndex = 0;
     currentAlbum = albums[albumIndex];
 
     if (buildSongList(currentArtist, currentAlbum))
     {
       if (!songs.empty())
       {
-        songIndex = songs.size() - 1;  // Go to last song of previous album
+        songIndex         = goForward ? 0 : (int)songs.size() - 1;
+        playingSongIndex  = songIndex;
+        playingAlbumIndex = albumIndex;
+        playingAlbum      = currentAlbum;
         playCurrentSong(true);
         displayNeedsUpdate = true;
-        logRamSpace("auto previous - previous album");
+        logRamSpace(goForward ? "auto next - next album" : "auto previous - previous album");
         return;
       }
       else
       {
-        Serial.println("⚠️ Album has no songs, trying previous");
-        autoPrevious();
+        Serial.printf("⚠️ Album has no songs, trying %s\n", label);
+        playingSongIndex  = songIndex;
+        playingAlbumIndex = albumIndex;
+        playingAlbum      = currentAlbum;
+        navigateInDirection(dir);
         return;
       }
     }
     else
     {
       Serial.println("⚠️ Failed to load album songs");
-      autoPrevious();
+      playingSongIndex  = songIndex;
+      playingAlbumIndex = albumIndex;
+      playingAlbum      = currentAlbum;
+      navigateInDirection(dir);
       return;
     }
   }
 
-  // Try previous artist
-  if (artistIndex - 1 >= 0)
+  // Try next/previous artist
+  int nextArtist = artistIndex + dir;
+  if (nextArtist >= 0 && nextArtist < (int)artists.size())
   {
-    artistIndex--;
-    
+    artistIndex   = nextArtist;
+    if (goForward) { albumIndex = 0; songIndex = 0; }
     currentArtist = artists[artistIndex];
 
     if (buildAlbumList(currentArtist))
     {
       if (!albums.empty())
       {
-        albumIndex = albums.size() - 1;  // Go to last album of previous artist
+        if (!goForward) albumIndex = (int)albums.size() - 1;
         currentAlbum = albums[albumIndex];
 
         if (buildSongList(currentArtist, currentAlbum))
         {
           if (!songs.empty())
           {
-            songIndex = songs.size() - 1;  // Go to last song
+            songIndex = goForward ? 0 : (int)songs.size() - 1;
+            savePlayingContext();
             playCurrentSong(true);
             displayNeedsUpdate = true;
-            logRamSpace("auto previous - previous artist");
+            logRamSpace(goForward ? "auto next - next artist" : "auto previous - previous artist");
             return;
           }
           else
           {
             Serial.println("⚠️ No songs found");
-            autoPrevious();
+            savePlayingContext();
+            navigateInDirection(dir);
             return;
           }
         }
+        // buildSongList failed — fall through to boundary
       }
       else
       {
         Serial.println("⚠️ Artist has no albums");
-        autoPrevious();
+        playingArtistIndex = artistIndex;
+        playingArtist      = currentArtist;
+        navigateInDirection(dir);
         return;
       }
     }
   }
 
-  // Already at beginning of library
-  Serial.println("📀 At beginning of library");
-  // Restart current song
-  playCurrentSong(true);
-  displayNeedsUpdate = true;
-  logRamSpace("auto previous - restart");
-}
-
-void autoNext()
-{
-  Serial.println("Auto-advancing to next track...");
-
-  // Try next song in current album
-  if (songIndex + 1 < (int)songs.size())
+  // Boundary of library
+  if (goForward)
   {
-    songIndex++;
+    Serial.println("📀 Reached end of library");
+    stopPlayback();
+    navigateToMenu(MENU_NOW_PLAYING);
+    displayNeedsUpdate = true;
+    logRamSpace("auto next - end");
+  }
+  else
+  {
+    Serial.println("📀 At beginning of library");
     playCurrentSong(true);
     displayNeedsUpdate = true;
-    logRamSpace("auto next - same album");
-    return;
+    logRamSpace("auto previous - restart");
   }
-
-  // Try next album
-  if (albumIndex + 1 < (int)albums.size())
-  {
-    albumIndex++;
-    songIndex = 0;
-
-    if (albumIndex < (int)albums.size())
-    {
-      currentAlbum = albums[albumIndex];
-
-      if (buildSongList(currentArtist, currentAlbum))
-      {
-        if (!songs.empty())
-        {
-          playCurrentSong(true);
-          displayNeedsUpdate = true;
-          logRamSpace("auto next - next album");
-          return;
-        }
-        else
-        {
-          Serial.println("⚠️ Album has no songs, trying next");
-          autoNext();
-          return;
-        }
-      }
-      else
-      {
-        Serial.println("⚠️ Failed to load album songs");
-        autoNext();
-        return;
-      }
-    }
-  }
-
-  // Try next artist
-  if (artistIndex + 1 < (int)artists.size())
-  {
-    artistIndex++;
-    albumIndex = 0;
-    songIndex = 0;
-
-    if (artistIndex < (int)artists.size())
-    {
-      currentArtist = artists[artistIndex];
-
-      if (buildAlbumList(currentArtist))
-      {
-        if (!albums.empty())
-        {
-          currentAlbum = albums[0];
-
-          if (buildSongList(currentArtist, currentAlbum))
-          {
-            if (!songs.empty())
-            {
-              playCurrentSong(true);
-              displayNeedsUpdate = true;
-              logRamSpace("auto next - next artist");
-              return;
-            }
-            else
-            {
-              Serial.println("⚠️ No songs found");
-              autoNext();
-              return;
-            }
-          }
-        }
-        else
-        {
-          Serial.println("⚠️ Artist has no albums");
-          autoNext();
-          return;
-        }
-      }
-    }
-  }
-
-  // End of library
-  Serial.println("📀 Reached end of library");
-  stopPlayback();
-  navigateToMenu(MENU_NOW_PLAYING);
-  displayNeedsUpdate = true;
-  logRamSpace("auto next - end");
 }
+
+void autoPrevious() { navigateInDirection(-1); }
+
+void autoNext()     { navigateInDirection(+1); }

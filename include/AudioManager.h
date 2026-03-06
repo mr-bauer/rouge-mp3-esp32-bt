@@ -14,8 +14,10 @@ void pausePlayback();
 void resumePlayback();
 void stopPlayback();
 void playCurrentSong(bool updateDisplay);
+void setM4AVolume(float vol);
 void reconnectBluetooth();
 void disconnectBluetooth();
 void changeBluetoothDevice(const String& new_device_name);
+void startBTScan();
 
 #endif

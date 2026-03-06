@@ -138,9 +138,61 @@ void pollButtons() {
     }
   }
   
-  // ADC buttons with filtering - SIMPLIFIED
+  // ADC buttons with filtering
   processADCButton(BTN_IDX_LEFT, BTN_LEFT, "Left", handleButtonPress, 1);
-  processADCButton(BTN_IDX_TOP, BTN_TOP, "Top", handleButtonPress, 2);
-  processADCButton(BTN_IDX_BOTTOM, BTN_BOTTOM, "Bottom", handleButtonPress, 3);
   processADCButton(BTN_IDX_RIGHT, BTN_RIGHT, "Right", handleButtonPress, 4);
+
+  // TOP: short press = Back/Menu, long press (700ms) = Home
+  if (btnPressed[BTN_IDX_TOP]) {
+    unsigned long dur = millis() - pressStartTime[BTN_IDX_TOP];
+    bool pinLow = (digitalRead(BTN_TOP) == LOW);
+    if (pinLow && dur >= LONG_PRESS_MS) {
+      // Long press fires while still held
+      btnPressed[BTN_IDX_TOP] = false;
+      if (!scrolling) {
+        lastActivityTime = millis();
+        handleTopLongPress();
+      }
+    } else if (!pinLow && dur >= BUTTON_MIN_DURATION_ADC) {
+      // Released within long-press threshold → normal short press
+      btnPressed[BTN_IDX_TOP] = false;
+      if (!scrolling) {
+        lastActivityTime = millis();
+        hapticBack();
+        handleButtonPress(2);
+      }
+    } else if (!pinLow) {
+      // Released too quickly → glitch
+      btnPressed[BTN_IDX_TOP] = false;
+      Serial.println("⚠️ Top button glitch filtered");
+    }
+    // else: still held, duration < LONG_PRESS_MS → wait
+  }
+
+  // BOTTOM: short press = Play/Pause, long press (700ms) = Now Playing
+  if (btnPressed[BTN_IDX_BOTTOM]) {
+    unsigned long dur = millis() - pressStartTime[BTN_IDX_BOTTOM];
+    bool pinLow = (digitalRead(BTN_BOTTOM) == LOW);
+    if (pinLow && dur >= LONG_PRESS_MS) {
+      // Long press fires while still held
+      btnPressed[BTN_IDX_BOTTOM] = false;
+      if (!scrolling) {
+        lastActivityTime = millis();
+        handleBottomLongPress();
+      }
+    } else if (!pinLow && dur >= BUTTON_MIN_DURATION_ADC) {
+      // Released within long-press threshold → normal short press
+      btnPressed[BTN_IDX_BOTTOM] = false;
+      if (!scrolling) {
+        lastActivityTime = millis();
+        hapticButtonPress();
+        handleButtonPress(3);
+      }
+    } else if (!pinLow) {
+      // Released too quickly → glitch
+      btnPressed[BTN_IDX_BOTTOM] = false;
+      Serial.println("⚠️ Bottom button glitch filtered");
+    }
+    // else: still held, duration < LONG_PRESS_MS → wait
+  }
 }

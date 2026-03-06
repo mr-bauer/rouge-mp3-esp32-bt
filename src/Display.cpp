@@ -29,6 +29,11 @@ extern int lastScrollDirection;
 static int activeBrightness = -1;  // -1 = uninitialized
 static int targetBrightness = -1;  // -1 = uninitialized
 
+// Set true by the 1s progress tick — updateNowPlayingScreen() skips JPEG
+// decode and only repaints the bottom progress-bar strip
+static bool nowPlayingProgressOnly = false;
+static int  scanAnimFrame          = 0;   // 0-5 spinner dot index
+
 // ============================================================================
 // COLOR THEME GLOBALS
 // ============================================================================
@@ -41,6 +46,22 @@ uint16_t COLOR_DISABLED  = 0x7BEF;
 uint16_t COLOR_ACCENT    = 0x051F;
 uint16_t COLOR_HEADER    = 0xFFFF;
 uint16_t COLOR_SEPARATOR = 0x4208;
+
+// Apply the right font + scale for the current textSizePreference.
+// 1=small (DejaVu9 @1x), 2=medium (DejaVu12 @1x), 3=large (DejaVu18 @1x).
+// Call this before any content-area text draw; header code resets font to nullptr explicitly.
+static void applyContentFont(lgfx::LGFXBase& gfx) {
+    if (textSizePreference == 1) {
+        gfx.setFont(&lgfx::fonts::DejaVu9);
+        gfx.setTextSize(1);
+    } else if (textSizePreference == 2) {
+        gfx.setFont(&lgfx::fonts::DejaVu12);
+        gfx.setTextSize(1);
+    } else {
+        gfx.setFont(&lgfx::fonts::DejaVu18);
+        gfx.setTextSize(1);
+    }
+}
 
 void applyTheme(int themeIdx) {
   if (themeIdx == 1) {  // Light
@@ -116,12 +137,32 @@ void displayTask(void *param) {
     manageSleep();      // check inactivity → dim flag or deep sleep
     stepBrightness();   // smooth brightness transition toward target
 
-    // Tick the Now Playing progress bar once per second while playing
+    unsigned long now = millis();
+
+    // Tick the Now Playing progress bar once per second while playing.
+    // Set nowPlayingProgressOnly so only the bottom strip is repainted (no JPEG decode).
     static unsigned long lastProgressTick = 0;
     if (currentMenu == MENU_NOW_PLAYING && player_state == STATE_PLAYING) {
-      unsigned long now = millis();
       if (now - lastProgressTick >= 1000) {
         lastProgressTick = now;
+        nowPlayingProgressOnly = true;
+        displayNeedsUpdate = true;
+      }
+    }
+
+    // Periodic header refresh (battery / BT status / play-pause icon).
+    // Fires only when periodicHeaderUpdate would be true in updateDisplay(),
+    // so the early-return path is guaranteed to execute — no JPEG decode.
+    if (now - lastHeaderUpdate > DISPLAY_HEADER_UPDATE_INTERVAL) {
+      displayNeedsUpdate = true;
+    }
+
+    // Tick BT scan spinner animation every 150 ms while scanning
+    static unsigned long lastScanTick = 0;
+    if (btScanning && currentMenu == MENU_BT_SCAN) {
+      if (now - lastScanTick >= 150) {
+        lastScanTick = now;
+        scanAnimFrame = (scanAnimFrame + 1) % 6;
         displayNeedsUpdate = true;
       }
     }
@@ -158,14 +199,18 @@ void initDisplay()
 
   // LovyanGFX handles SPI init, reset sequence, and backlight PWM internally
   display.init();
-  display.setRotation(3);
+#ifdef DISPLAY_240WIDE
+  display.setRotation(2);  // Square 240x240 panel — adjust (1/2/3) if orientation is wrong
+#else
+  display.setRotation(3);  // 240x320 panel in landscape
+#endif
   display.fillScreen(COLOR_BG);
   display.setTextColor(COLOR_TEXT);
   display.setTextWrap(false);
 
   Serial.println("✅ Display initialized");
 
-  // Allocate full-screen sprite in PSRAM (~150KB at 16bpp for 320x240)
+  // Allocate full-screen sprite in PSRAM (~150KB for 320x240; ~112KB for 240x240)
   // Must call setPsram(true) — LGFX_Sprite defaults to DMA (internal) allocation
   // which cannot fit 115KB. setPsram(true) uses MALLOC_CAP_SPIRAM with DMA fallback.
   sprite.setColorDepth(16);
@@ -258,44 +303,23 @@ void drawLightningIcon(int x, int y, uint16_t color) {
 }
 
 // Truncate text to fit a menu item row at the current font size.
-// Available width = 320 - 8px padding - 20px arrow = 292px
-// Size 1: 6px/char → 48 chars max; Size 2: 12px/char → 24 chars max
+// Measures pixel width using the active content font so it works for all
+// three size preferences including proportional fonts (e.g. DejaVu12).
 static std::string truncateForDisplay(const char* text) {
   if (!text) return "";
-  int maxChars = (textSizePreference == 1) ? 48 : 24;
   std::string s(text);
-  if ((int)s.length() <= maxChars) return s;
-  return s.substr(0, maxChars - 3) + "...";
+  // Set the content font on sprite so textWidth() is accurate
+  applyContentFont(sprite);
+  const int maxW = SCREEN_WIDTH - UI_PADDING - 20;  // padding + arrow
+  if (sprite.textWidth(s.c_str()) <= maxW) return s;
+  while (s.size() > 3 && sprite.textWidth((s + "...").c_str()) > maxW)
+    s.pop_back();
+  return s + "...";
 }
 
 void drawMenuItem(const char* text, int y, bool selected, bool disabled)
 {
-  if (!text) return;
-
-  sprite.setTextWrap(false);
-  sprite.setTextSize(textSizePreference);
-
-  int textOffsetY = (textSizePreference == 1) ? y + 1 : y + 4;
-  std::string displayText = truncateForDisplay(text);
-
-  if (selected) {
-    sprite.fillRoundRect(4, y - 4, SCREEN_WIDTH - 8, uiItemHeight(), 4, COLOR_SELECTED);
-    sprite.setTextColor(COLOR_BG);
-  } else if (disabled) {
-    sprite.setTextColor(COLOR_DISABLED);
-  } else {
-    sprite.setTextColor(COLOR_TEXT);
-  }
-
-  sprite.setCursor(UI_PADDING, textOffsetY);
-  sprite.print(displayText.c_str());
-
-  if (!disabled && !selected) {
-    sprite.setCursor(SCREEN_WIDTH - 20, textOffsetY);
-    sprite.print(">");
-  }
-
-  sprite.setTextColor(COLOR_TEXT);
+  drawMenuItemWithPlayback(text, y, selected, disabled, false, STATE_STOPPED);
 }
 
 void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disabled,
@@ -303,9 +327,9 @@ void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disab
   if (!text) return;
 
   sprite.setTextWrap(false);
-  sprite.setTextSize(textSizePreference);
+  applyContentFont(sprite);
 
-  int textOffsetY = (textSizePreference == 1) ? y + 1 : y + 4;
+  int textOffsetY = (textSizePreference == 1) ? y + 1 : (textSizePreference == 2) ? y + 1 : y + 6;
   std::string displayText = truncateForDisplay(text);
 
   if (selected) {
@@ -322,22 +346,21 @@ void drawMenuItemWithPlayback(const char* text, int y, bool selected, bool disab
 
   if (isPlaying) {
     int iconX = SCREEN_WIDTH - 20;
-    int iconY = (textSizePreference == 1) ? y + 2 : y + 8;
+    int iconSize = (textSizePreference == 1) ? 8 : (textSizePreference == 2) ? 10 : 12;
+    int iconY = (y - 4) + (uiItemHeight() - iconSize) / 2;  // row box starts at y-4
 
     if (playState == STATE_PLAYING) {
-      int iconSize = (textSizePreference == 1) ? 8 : 12;
       sprite.fillTriangle(
         iconX, iconY, iconX, iconY + iconSize, iconX + iconSize, iconY + iconSize/2,
         selected ? COLOR_BG : COLOR_SELECTED
       );
     } else if (playState == STATE_PAUSED) {
       int barWidth = (textSizePreference == 1) ? 3 : 4;
-      int barHeight = (textSizePreference == 1) ? 8 : 12;
       int gap = (textSizePreference == 1) ? 2 : 3;
       uint16_t color = selected ? COLOR_BG : COLOR_DISABLED;
 
-      sprite.fillRect(iconX, iconY, barWidth, barHeight, color);
-      sprite.fillRect(iconX + barWidth + gap, iconY, barWidth, barHeight, color);
+      sprite.fillRect(iconX, iconY, barWidth, iconSize, color);
+      sprite.fillRect(iconX + barWidth + gap, iconY, barWidth, iconSize, color);
     }
   } else if (!disabled && !selected) {
     sprite.setCursor(SCREEN_WIDTH - 20, textOffsetY);
@@ -353,6 +376,7 @@ void drawScrollIndicator(int currentIndex, int listSize) {
   sprite.fillRect(SCREEN_WIDTH - UI_SCROLL_INDICATOR_WIDTH,
                   SCREEN_HEIGHT - 30, UI_SCROLL_INDICATOR_WIDTH, 20, COLOR_BG);
 
+  sprite.setFont(nullptr);
   sprite.setTextSize(1);
   sprite.setTextColor(COLOR_TEXT);
   sprite.setCursor(SCREEN_WIDTH - 40, SCREEN_HEIGHT - 20);
@@ -362,7 +386,7 @@ void drawScrollIndicator(int currentIndex, int listSize) {
 void drawControlBar(int centerY, const char* label, int value, int maxValue,
                    const char* unit) {
   // Label
-  sprite.setTextSize(textSizePreference);
+  applyContentFont(sprite);
   sprite.setTextColor(COLOR_TEXT);
   drawCenteredText(sprite, label, centerY);
   centerY += 30;
@@ -370,12 +394,13 @@ void drawControlBar(int centerY, const char* label, int value, int maxValue,
   // Value with unit
   char valueText[16];
   snprintf(valueText, sizeof(valueText), "%d%s", value, unit);
+  sprite.setFont(nullptr);
   sprite.setTextSize(3);
   drawCenteredText(sprite, valueText, centerY);
   centerY += 40;
 
   // Bar
-  int barWidth = 200;
+  int barWidth = SCREEN_WIDTH - 120;  // 200px at 320-wide, 120px at 240-wide
   int barHeight = 20;
   int barX = (SCREEN_WIDTH - barWidth) / 2;
   int barY = centerY;
@@ -454,9 +479,10 @@ static void drawBatteryIcon(int x, int y, int percent, bool charging) {
   // 5. Nub — solid white, vertically centered on body
   sprite.fillRect(x + W, y + (H - NUB_H) / 2, NUB_W, NUB_H, COLOR_TEXT);
 
-  // 6. Number only (no %) centered on body in black
+  // 6. Number only (no %) centered on body in black — always use default bitmap font
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", percent);
+  sprite.setFont(nullptr);  // reset from any inherited DejaVu font
   sprite.setTextSize(1);
   sprite.setTextColor(COLOR_BG);
   int16_t tw = sprite.textWidth(buf);
@@ -487,6 +513,7 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
       case MENU_MUSIC: headerText = "Music"; break;
       case MENU_SETTINGS: headerText = "Settings"; break;
       case MENU_BLUETOOTH: headerText = "Bluetooth"; break;
+      case MENU_BT_SCAN: headerText = btScanning ? "BT Scan..." : "BT Scan"; break;
       case MENU_ARTIST_LIST: headerText = "Artists"; break;
       case MENU_ALBUM_LIST: headerText = "Albums"; break;
       case MENU_SONG_LIST: headerText = "Songs"; break;
@@ -494,10 +521,12 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
     }
   }
 
-  // Header bar — black background
+  // Header bar — DejaVu18 @1x, vertically centered in 40px header
+  sprite.setFont(&lgfx::fonts::DejaVu18);
+  sprite.setTextSize(1);
   sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_BG);
   sprite.setTextColor(COLOR_HEADER);
-  drawCenteredText(sprite, headerText, 12, 2);
+  drawCenteredText(sprite, headerText, 8, 1);
 
   // Playback indicator
   if (player_state == STATE_PLAYING || player_state == STATE_PAUSED) {
@@ -552,9 +581,12 @@ void drawHomeScreen(int selectedIdx) {
     // Selection border — 3px thick rounded rect around the zone
     if (selected) {
       uint16_t borderColor = enabled ? COLOR_SELECTED : 0x02E0;  // green or dark green
-      int bx = ZONE_W * i + 4;
+      // At 240-wide the zone is only 60px and the icon is 50px, so use a 1px margin
+      // to keep the icon inside the 3px-thick border. At 320-wide use 4px margin.
+      int margin = (ZONE_W <= 64) ? 1 : 4;
+      int bx = ZONE_W * i + margin;
       int by = BOX_TOP;
-      int bw = ZONE_W - 8;
+      int bw = ZONE_W - margin * 2;
       int bh = BOX_BOTTOM - BOX_TOP;
       sprite.drawRoundRect(bx,     by,     bw,     bh,     8, borderColor);
       sprite.drawRoundRect(bx + 1, by + 1, bw - 2, bh - 2, 7, borderColor);
@@ -620,7 +652,84 @@ void updateMenuList(MenuType menu, int idx, bool fullRedraw) {
   drawScrollIndicator(idx, listSize);
 }
 
+static void drawAlphaScrollOverlay() {
+  const int OW = 90, OH = 70;
+  const int OX = (SCREEN_WIDTH - OW) / 2;
+  const int OY = UI_HEADER_HEIGHT + (SCREEN_HEIGHT - UI_HEADER_HEIGHT - OH) / 2;
+
+  sprite.fillRoundRect(OX, OY, OW, OH, 8, COLOR_SELECTED);
+  sprite.drawRoundRect(OX, OY, OW, OH, 8, COLOR_TEXT);
+
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_BG);
+  drawCenteredText(sprite, "Jump to", OY + 8, 1);
+
+  char ls[2] = { fastScrollLetter, '\0' };
+  sprite.setTextSize(4);
+  int tw = sprite.textWidth(ls);
+  sprite.setCursor(OX + (OW - tw) / 2, OY + 22);
+  sprite.print(ls);
+
+  sprite.setTextColor(COLOR_TEXT);
+}
+
+// BT scan spinner overlay — drawn on top of the (building) device list while scanning.
+// 6 orbiting dots with a 3-dot trailing tail; "Searching..." label; found-device count.
+static void drawBTScanOverlay() {
+  const int OW = 110, OH = 90;
+  const int OX = (SCREEN_WIDTH  - OW) / 2;
+  const int OY = UI_HEADER_HEIGHT + (SCREEN_HEIGHT - UI_HEADER_HEIGHT - OH) / 2;
+  const int CX = OX + OW / 2;
+  const int CY = OY + OH / 2 - 8;   // shift dot ring up slightly to leave room for label
+  const int R  = 20;                 // orbit radius
+
+  // 6 dot offsets (integer, radius 20, starting at top, clockwise)
+  static const int DX[6] = {  0,  17,  17,   0, -17, -17 };
+  static const int DY[6] = { -20, -10,  10,  20,  10, -10 };
+  static const int DOT_R[4] = { 5, 4, 3, 2 };  // sizes: head, tail1, tail2, tail3
+
+  sprite.fillRoundRect(OX, OY, OW, OH, 10, COLOR_SELECTED);
+  sprite.drawRoundRect(OX, OY, OW, OH, 10, COLOR_TEXT);
+
+  // Draw dim base dots first
+  for (int i = 0; i < 6; i++) {
+    sprite.fillCircle(CX + DX[i], CY + DY[i], 2, COLOR_BG);
+  }
+
+  // Draw trailing tail (3 dots behind head, decreasing size/brightness)
+  for (int t = 3; t >= 1; t--) {
+    int i = ((scanAnimFrame - t) + 6) % 6;
+    sprite.fillCircle(CX + DX[i], CY + DY[i], DOT_R[t], COLOR_DISABLED);
+  }
+  // Draw head (brightest, largest)
+  sprite.fillCircle(CX + DX[scanAnimFrame], CY + DY[scanAnimFrame], DOT_R[0], COLOR_BG);
+
+  // "Searching..." label
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_BG);
+  drawCenteredText(sprite, "Searching...", OY + OH - 18, 1);
+
+  // Device count at bottom
+  if (!btFoundDevices.empty()) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d found", (int)btFoundDevices.size());
+    sprite.setTextSize(1);
+    drawCenteredText(sprite, buf, OY + OH - 8, 1);
+  }
+
+  sprite.setTextColor(COLOR_TEXT);
+}
+
 void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
+  // Alpha-jump overlay-only mode: letter changed but list doesn't need a full redraw
+  if (fastScrollActive && alphaOverlayOnly) {
+    alphaOverlayOnly = false;
+    drawAlphaScrollOverlay();  // fillRoundRect self-erases old overlay before drawing new letter
+    return;
+  }
+
   int listSize = 0;
   int arrayIndex = 0;
   const char* subheader = nullptr;
@@ -650,11 +759,19 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
                                          lastWindowStart[arrayIndex],
                                          listSize, uiMaxVisibleItems());
 
+  // Guard: ensure selected item is actually visible (handles large index jumps from alpha scroll)
+  if (idx < windowStart || idx >= windowStart + uiMaxVisibleItems()) {
+    windowStart = idx - uiMaxVisibleItems() / 2;
+    if (windowStart < 0) windowStart = 0;
+    if (windowStart > listSize - uiMaxVisibleItems()) windowStart = listSize - uiMaxVisibleItems();
+  }
+
   bool windowChanged = (windowStart != lastWindowStart[arrayIndex]) || fullRedraw;
   lastWindowStart[arrayIndex] = windowStart;
 
-  // Draw subheader if needed
+  // Draw subheader if needed (always small/default font regardless of textSizePreference)
   if (fullRedraw && subheader) {
+    sprite.setFont(nullptr);
     sprite.setTextSize(1);
     sprite.setTextColor(COLOR_DISABLED);
     sprite.setCursor(8, 45);
@@ -671,13 +788,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
 
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentArtist.empty() &&
-                    (*items)[windowStart + i] == currentArtist);
+        isPlaying = (player_state != STATE_STOPPED && !playingArtist.empty() &&
+                    (*items)[windowStart + i] == playingArtist);
         drawMenuItemWithPlayback((*items)[windowStart + i].c_str(), y, selected,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_ALBUM_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentAlbum.empty() &&
-                    (*items)[windowStart + i] == currentAlbum);
+        isPlaying = (player_state != STATE_STOPPED && !playingAlbum.empty() &&
+                    (*items)[windowStart + i] == playingAlbum);
         drawMenuItemWithPlayback((*items)[windowStart + i].c_str(), y, selected,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_SONG_LIST) {
@@ -696,13 +813,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
 
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentArtist.empty() &&
-                    (*items)[lastDisplayedIndex] == currentArtist);
+        isPlaying = (player_state != STATE_STOPPED && !playingArtist.empty() &&
+                    (*items)[lastDisplayedIndex] == playingArtist);
         drawMenuItemWithPlayback((*items)[lastDisplayedIndex].c_str(), y, false,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_ALBUM_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentAlbum.empty() &&
-                    (*items)[lastDisplayedIndex] == currentAlbum);
+        isPlaying = (player_state != STATE_STOPPED && !playingAlbum.empty() &&
+                    (*items)[lastDisplayedIndex] == playingAlbum);
         drawMenuItemWithPlayback((*items)[lastDisplayedIndex].c_str(), y, false,
                                 false, isPlaying, player_state);
       } else if (menu == MENU_SONG_LIST) {
@@ -720,13 +837,13 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
 
       bool isPlaying = false;
       if (menu == MENU_ARTIST_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentArtist.empty() &&
-                    (*items)[idx] == currentArtist);
+        isPlaying = (player_state != STATE_STOPPED && !playingArtist.empty() &&
+                    (*items)[idx] == playingArtist);
         drawMenuItemWithPlayback((*items)[idx].c_str(), y, true, false,
                                 isPlaying, player_state);
       } else if (menu == MENU_ALBUM_LIST) {
-        isPlaying = (player_state != STATE_STOPPED && !currentAlbum.empty() &&
-                    (*items)[idx] == currentAlbum);
+        isPlaying = (player_state != STATE_STOPPED && !playingAlbum.empty() &&
+                    (*items)[idx] == playingAlbum);
         drawMenuItemWithPlayback((*items)[idx].c_str(), y, true, false,
                                 isPlaying, player_state);
       } else if (menu == MENU_SONG_LIST) {
@@ -742,6 +859,10 @@ void updateMusicBrowserList(MenuType menu, int idx, bool fullRedraw) {
   lastDisplayedIndex = idx;
 
   drawScrollIndicator(idx, listSize);
+
+  if (fastScrollActive) {
+    drawAlphaScrollOverlay();
+  }
 }
 
 void updateBrightnessScreen() {
@@ -761,11 +882,95 @@ void updateBrightnessScreen() {
 }
 
 void updateVolumeScreen() {
-  sprite.fillRect(0, 50, SCREEN_WIDTH, SCREEN_HEIGHT - 80, COLOR_BG);
+  sprite.fillRect(0, UI_HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - UI_HEADER_HEIGHT, COLOR_BG);
   drawControlBar(90, "Volume", currentVolume, 100, "%");
 }
 
+// Progress bar constants shared between fast-path and full-redraw
+static const int NP_BAR_X = 8;
+static const int NP_BAR_Y = 196;
+static const int NP_BAR_W = SCREEN_WIDTH - 16;
+static const int NP_BAR_H = 8;
+
+// Returns elapsed playback seconds (capped at duration). Sets outDuration.
+static unsigned long calcElapsedSeconds(int& outDuration) {
+  outDuration = (songIndex >= 0 && songIndex < (int)songs.size())
+                ? songs[songIndex].duration : 0;
+  if (playbackStartMillis == 0) return 0;
+  unsigned long paused = totalPausedMs;
+  if (player_state == STATE_PAUSED && pauseStartMillis > 0)
+    paused += millis() - pauseStartMillis;
+  unsigned long rawMs = millis() - playbackStartMillis;
+  unsigned long el = (rawMs > paused) ? (rawMs - paused) / 1000 : 0;
+  if (outDuration > 0 && (int)el > outDuration) el = outDuration;
+  return el;
+}
+
+// Draws the progress bar outline and fill.
+static void drawProgressBar(unsigned long elapsed, int duration) {
+  sprite.drawRect(NP_BAR_X, NP_BAR_Y, NP_BAR_W, NP_BAR_H, COLOR_DISABLED);
+  if (duration > 0) {
+    int fillW = constrain((int)((long)elapsed * (NP_BAR_W - 4) / duration), 0, NP_BAR_W - 4);
+    if (fillW > 0)
+      sprite.fillRect(NP_BAR_X + 2, NP_BAR_Y + 2, fillW, NP_BAR_H - 4, COLOR_SELECTED);
+  }
+}
+
+// Draws elapsed / total time strings below the progress bar.
+static void drawTimeLabels(unsigned long elapsed, int duration) {
+  char elapsedStr[8], totalStr[8];
+  snprintf(elapsedStr, sizeof(elapsedStr), "%d:%02d", (int)elapsed / 60, (int)elapsed % 60);
+  if (duration > 0) snprintf(totalStr, sizeof(totalStr), "%d:%02d", duration / 60, duration % 60);
+  else              snprintf(totalStr, sizeof(totalStr), "--:--");
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  sprite.setTextColor(COLOR_DISABLED);
+  sprite.setCursor(NP_BAR_X, NP_BAR_Y + NP_BAR_H + 4);
+  sprite.print(elapsedStr);
+  sprite.setCursor(NP_BAR_X + NP_BAR_W - sprite.textWidth(totalStr), NP_BAR_Y + NP_BAR_H + 4);
+  sprite.print(totalStr);
+  sprite.setTextColor(COLOR_TEXT);
+}
+
+// Draws a small shuffle-mode indicator centered below the time labels.
+static void drawShuffleIndicator() {
+  const int y = NP_BAR_Y + NP_BAR_H + 18;  // below time labels (~y=222)
+  sprite.setFont(nullptr);
+  sprite.setTextSize(1);
+  if (shuffleMode == 0) {
+    // Erase any previous indicator
+    sprite.fillRect(0, y, SCREEN_WIDTH, SCREEN_HEIGHT - y, COLOR_BG);
+    return;
+  }
+  const char* label = (shuffleMode == 1) ? "SHUF:SONG" : "SHUF:ALL";
+  int tw = sprite.textWidth(label);
+  sprite.fillRect(0, y, SCREEN_WIDTH, SCREEN_HEIGHT - y, COLOR_BG);
+  int x = (SCREEN_WIDTH - tw) / 2;
+  sprite.setTextColor(COLOR_SELECTED);
+  sprite.setCursor(x, y);
+  sprite.print(label);
+  sprite.setTextColor(COLOR_TEXT);
+}
+
 void updateNowPlayingScreen() {
+  // ── Fast path: 1s progress tick — only repaint the bottom strip ──────────
+  // Avoids JPEG decode and full text redraw on every tick.
+  if (nowPlayingProgressOnly) {
+    nowPlayingProgressOnly = false;
+
+    int duration;
+    unsigned long elapsed = calcElapsedSeconds(duration);
+
+    const int STRIP_Y = NP_BAR_Y - 4;  // small margin above bar
+    sprite.fillRect(0, STRIP_Y, SCREEN_WIDTH, SCREEN_HEIGHT - STRIP_Y, COLOR_BG);
+
+    drawProgressBar(elapsed, duration);
+    drawTimeLabels(elapsed, duration);
+    drawShuffleIndicator();
+    return;
+  }
+  // ── Full redraw ───────────────────────────────────────────────────────────
+
   sprite.fillRect(0, UI_HEADER_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - UI_HEADER_HEIGHT, COLOR_BG);
 
   char title[128]  = {0};
@@ -777,21 +982,31 @@ void updateNowPlayingScreen() {
 
   if (albumArtAvailable) {
     // Side-by-side layout: art on left, text on right
+    // 320-wide: 130px art → 160px text area
+    // 240-wide:  90px art → 129px text area
+#ifdef DISPLAY_240WIDE
+    const int ART_SIZE = 90;
+    const int ART_X    = 5;
+    const int ART_Y    = 55;
+    const int TEXT_X   = ART_X + ART_SIZE + 8;   // 103
+    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8; // 129px
+#else
     const int ART_SIZE = 130;
     const int ART_X    = 10;
     const int ART_Y    = 55;
     const int TEXT_X   = ART_X + ART_SIZE + 12;  // 152
-    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8;  // 160px
+    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8; // 160px
+#endif
 
     sprite.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, COLOR_BG);
     drawAlbumArt(ART_X, ART_Y, ART_SIZE);
 
-    int charsPerLine = TEXT_W / (textSizePreference == 1 ? 6 : 12);
-    int lineSpacing  = textSizePreference == 1 ? 10 : 22;
+    int charsPerLine = TEXT_W / (textSizePreference == 1 ? 6 : (textSizePreference == 2 ? 8 : 10));
+    int lineSpacing  = textSizePreference == 1 ? 10 : (textSizePreference == 2 ? 15 : 26);
     int y = 90;
 
     if (strlen(title) > 0) {
-      sprite.setTextSize(textSizePreference);
+      applyContentFont(sprite);
       sprite.setTextColor(COLOR_TEXT);
       String titleStr = String(title);
       for (int line = 0; line < 2 && !titleStr.isEmpty(); line++) {
@@ -803,6 +1018,7 @@ void updateNowPlayingScreen() {
       y += 2 * lineSpacing + 8;
     }
 
+    sprite.setFont(nullptr);
     sprite.setTextSize(1);
     sprite.setTextColor(COLOR_DISABLED);
     if (strlen(artist) > 0) {
@@ -821,22 +1037,23 @@ void updateNowPlayingScreen() {
 
   } else {
     // No art: centered layout using full width
-    int charsPerLine = textSizePreference == 1 ? 46 : 24;
-    int lineSpacing  = textSizePreference == 1 ? 10 : 20;
+    int charsPerLine = textSizePreference == 1 ? 46 : (textSizePreference == 2 ? 36 : 30);
+    int lineSpacing  = textSizePreference == 1 ? 10 : (textSizePreference == 2 ? 15 : 26);
     int y = 80;
 
     if (strlen(title) > 0) {
-      sprite.setTextSize(textSizePreference);
+      applyContentFont(sprite);
       sprite.setTextColor(COLOR_TEXT);
       String titleStr = String(title);
       for (int line = 0; line < 3 && !titleStr.isEmpty(); line++) {
         String chunk = titleStr.substring(0, min((int)titleStr.length(), charsPerLine));
-        drawCenteredText(sprite, chunk.c_str(), y + line * lineSpacing, textSizePreference);
+        drawCenteredText(sprite, chunk.c_str(), y + line * lineSpacing, 1);
         titleStr = titleStr.substring(chunk.length());
       }
-      y += textSizePreference == 1 ? 50 : 80;
+      y += textSizePreference == 1 ? 50 : (textSizePreference == 2 ? 65 : 80);
     }
 
+    sprite.setFont(nullptr);
     sprite.setTextSize(1);
     sprite.setTextColor(COLOR_DISABLED);
     if (strlen(artist) > 0) {
@@ -849,49 +1066,11 @@ void updateNowPlayingScreen() {
   }
 
   // ── Progress bar + time labels (both layouts) ─────────────────────────────
-  // Compute elapsed seconds, accounting for accumulated pause time
-  unsigned long elapsed = 0;
-  if (playbackStartMillis > 0) {
-    unsigned long paused = totalPausedMs;
-    if (player_state == STATE_PAUSED && pauseStartMillis > 0)
-      paused += millis() - pauseStartMillis;
-    unsigned long rawMs = millis() - playbackStartMillis;
-    elapsed = (rawMs > paused) ? (rawMs - paused) / 1000 : 0;
-  }
-
-  int duration = (songIndex >= 0 && songIndex < (int)songs.size())
-                 ? songs[songIndex].duration : 0;
-  if (duration > 0 && (int)elapsed > duration) elapsed = duration;
-
-  const int BAR_X = 8;
-  const int BAR_Y = 196;
-  const int BAR_W = SCREEN_WIDTH - 16;  // 304px
-  const int BAR_H = 8;
-
-  sprite.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, COLOR_DISABLED);
-
-  if (duration > 0) {
-    int fillW = (int)((long)elapsed * (BAR_W - 4) / duration);
-    if (fillW > BAR_W - 4) fillW = BAR_W - 4;
-    if (fillW > 0)
-      sprite.fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, COLOR_SELECTED);
-  }
-
-  char elapsedStr[8], totalStr[8];
-  snprintf(elapsedStr, sizeof(elapsedStr), "%d:%02d",
-           (int)elapsed / 60, (int)elapsed % 60);
-  if (duration > 0)
-    snprintf(totalStr, sizeof(totalStr), "%d:%02d", duration / 60, duration % 60);
-  else
-    snprintf(totalStr, sizeof(totalStr), "--:--");
-
-  sprite.setTextSize(1);
-  sprite.setTextColor(COLOR_DISABLED);
-  sprite.setCursor(BAR_X, BAR_Y + BAR_H + 4);
-  sprite.print(elapsedStr);
-  sprite.setCursor(BAR_X + BAR_W - sprite.textWidth(totalStr), BAR_Y + BAR_H + 4);
-  sprite.print(totalStr);
-  sprite.setTextColor(COLOR_TEXT);
+  int duration;
+  unsigned long elapsed = calcElapsedSeconds(duration);
+  drawProgressBar(elapsed, duration);
+  drawTimeLabels(elapsed, duration);
+  drawShuffleIndicator();
 }
 
 // ============================================================================
@@ -926,7 +1105,7 @@ void updateDisplay()
     sprite.fillSprite(COLOR_BG);
   }
 
-  sprite.setTextSize(textSizePreference);
+  applyContentFont(sprite);
   sprite.setTextColor(COLOR_TEXT);
   sprite.setTextWrap(false);
 
@@ -947,6 +1126,9 @@ void updateDisplay()
     if (volumeControlActive) {
       updateVolumeScreen();
     } else {
+      // On state changes (new song or menu arrival) force the full render path
+      // even if the 1s ticker happened to set nowPlayingProgressOnly in the same tick
+      if (fullRedraw || playbackStateChanged) nowPlayingProgressOnly = false;
       updateNowPlayingScreen();
     }
   } else if (menu == MENU_SETTINGS) {
@@ -964,19 +1146,16 @@ void updateDisplay()
   } else if (menu == MENU_MAIN) {
     drawHomeScreen(idx);
   } else {
-    // MENU_MUSIC, MENU_BLUETOOTH
+    // MENU_MUSIC, MENU_BLUETOOTH, MENU_BT_SCAN — all plain list menus
     updateMenuList(menu, idx, fullRedraw);
+    // Overlay spinner while BT scan is in progress
+    if (menu == MENU_BT_SCAN && btScanning) {
+      drawBTScanOverlay();
+    }
   }
 
   // Flush sprite to display via DMA in one operation — eliminates flicker
   sprite.pushSprite(0, 0);
 }
 
-void drawUI() {
-  sprite.fillSprite(COLOR_BG);
-  sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_ACCENT);
-  sprite.setTextColor(COLOR_HEADER);
-  drawCenteredText(sprite, "ROUGE MP3 PLAYER", 12, 2);
-  sprite.setTextColor(COLOR_TEXT);
-  sprite.pushSprite(0, 0);
-}
+

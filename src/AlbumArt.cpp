@@ -55,14 +55,74 @@ static bool isBaselineJpeg(const uint8_t* data, size_t len) {
     return true;  // couldn't find SOF marker — assume baseline to be permissive
 }
 
-bool loadAlbumArt(SdFat32& sd, const char* mp3Path) {
+bool loadAlbumArt(SdFat32& sd, const char* path,
+                  uint64_t covrOffset, uint32_t covrSize) {
     clearAlbumArt();
 
+    // M4A fast path: seek directly to pre-indexed JPEG bytes in the file
+    if (covrOffset > 0 && covrSize > 0) {
+        Serial.printf("   🖼️  Loading M4A cover art: offset=%llu size=%u\n", covrOffset, covrSize);
+
+        if (covrSize > ART_BUFFER_MAX) {
+            Serial.printf("   ⚠️  Cover art too large (%u bytes, max %u)\n", covrSize, ART_BUFFER_MAX);
+            return false;
+        }
+        size_t freePSRAM = ESP.getFreePsram();
+        if (covrSize > freePSRAM - 100000) {
+            Serial.printf("   ⚠️  Not enough PSRAM for cover art (%u needed, %u free)\n", covrSize, freePSRAM);
+            return false;
+        }
+
+        File32 f = sd.open(path, O_RDONLY);
+        if (!f) {
+            Serial.println("   ❌ Could not open M4A file for cover art");
+            return false;
+        }
+        if (!f.seek(covrOffset)) {
+            Serial.println("   ❌ Seek to cover art offset failed");
+            f.close();
+            return false;
+        }
+
+        artBuffer = (uint8_t*)ps_malloc(covrSize);
+        if (!artBuffer) {
+            Serial.println("   ❌ PSRAM allocation failed for cover art");
+            f.close();
+            return false;
+        }
+        if ((uint32_t)f.read(artBuffer, covrSize) != covrSize) {
+            Serial.println("   ❌ Cover art read failed");
+            free(artBuffer); artBuffer = nullptr;
+            f.close();
+            return false;
+        }
+        f.close();
+        artSize = covrSize;
+
+        // Validate JPEG magic bytes (FF D8)
+        if (artSize < 2 || artBuffer[0] != 0xFF || artBuffer[1] != 0xD8) {
+            Serial.println("   ⚠️  M4A cover art is not JPEG, skipping");
+            free(artBuffer); artBuffer = nullptr; artSize = 0;
+            return false;
+        }
+        // Reject progressive JPEGs — TJpgDec only handles Baseline DCT (SOF0)
+        if (!isBaselineJpeg(artBuffer, artSize)) {
+            Serial.println("   ⚠️  M4A cover art is progressive JPEG — skipping");
+            free(artBuffer); artBuffer = nullptr; artSize = 0;
+            return false;
+        }
+
+        albumArtAvailable = true;
+        Serial.printf("🖼️  M4A cover art loaded: %u bytes JPEG\n", artSize);
+        return true;
+    }
+
+    // MP3 / fallback path: scan ID3v2 APIC frame
     Serial.println("   📂 Opening MP3 for album art...");
-    Serial.printf("   Path: %s\n", mp3Path);
+    Serial.printf("   Path: %s\n", path);
     Serial.println("   Calling sd.open()...");
 
-    File32 f = sd.open(mp3Path, O_RDONLY);
+    File32 f = sd.open(path, O_RDONLY);
 
     Serial.println("   sd.open() returned");
     if (!f) {

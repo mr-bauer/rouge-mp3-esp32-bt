@@ -1,12 +1,12 @@
 # Music Indexer — Desktop Tool
 
-`music_indexer.py` is a Python script that scans your music library on an SD card and builds the SQLite database (`music.db`) that the Rouge MP3 Player loads at startup. You run it once on your computer whenever you add or reorganize music on the SD card.
+`music_indexer.py` is a Python script that scans your music library on an SD card and builds the SQLite database (`music.db`) that the Rouge Audio Player loads at startup. You run it once on your computer whenever you add or reorganize music on the SD card.
 
 ---
 
 ## Prerequisites
 
-Python 3.8 or later, and the `mutagen` library for reading ID3 tags:
+Python 3.8 or later, and the `mutagen` library for reading audio tags:
 
 ```bash
 pip install mutagen
@@ -16,7 +16,7 @@ pip install mutagen
 
 ## SD Card Layout
 
-The indexer expects MP3 files organized in a three-level folder structure:
+The indexer expects MP3 and M4A files organized in a three-level folder structure:
 
 ```
 SD_CARD/
@@ -24,11 +24,11 @@ SD_CARD/
     └── <Artist Name>/
         └── <Album Name>/
             ├── 01 - Track One.mp3
-            ├── 02 - Track Two.mp3
+            ├── 02 - Track Two.m4a
             └── ...
 ```
 
-The `<Artist Name>` and `<Album Name>` folders are used as fallbacks if ID3 tags are missing. If ID3 tags are present, the indexer uses the tag values and ignores the folder names.
+The `<Artist Name>` and `<Album Name>` folders are used as fallbacks if tags are missing. If tags are present, the indexer uses the tag values and ignores the folder names.
 
 After running the indexer, `music.db` goes in the SD card root:
 
@@ -71,11 +71,19 @@ python3 music_indexer.py /media/user/SD_CARD/Music /media/user/SD_CARD/music.db
 
 | Flag | Description |
 |------|-------------|
-| `-v`, `--verbose` | Print each MP3 file as it is processed |
+| `--source id3` | (default) Read title, artist, album, track, and year from embedded audio tags (ID3 for MP3, iTunes atoms for M4A) |
+| `--source folder` | Derive artist from the parent folder name, album from the subfolder name, and title from the filename; leading track-number prefixes are stripped automatically |
+| `-v`, `--verbose` | Print each file as it is processed, including M4A box-parsing details |
 | `--verify` | After indexing, print a sample of artists, albums, and songs to confirm the database looks correct |
 
 ```bash
-# Verbose output — shows every file
+# Use audio tags (default)
+python3 music_indexer.py /Volumes/SD_CARD/Music /Volumes/SD_CARD/music.db
+
+# Use folder/filename structure instead of tags
+python3 music_indexer.py /Volumes/SD_CARD/Music /Volumes/SD_CARD/music.db --source folder
+
+# Verbose output — shows every file, including M4A parse results
 python3 music_indexer.py /Volumes/SD_CARD/Music /Volumes/SD_CARD/music.db -v
 
 # Verify after indexing — recommended for first run
@@ -85,18 +93,80 @@ python3 music_indexer.py /Volumes/SD_CARD/Music /Volumes/SD_CARD/music.db --veri
 python3 music_indexer.py /Volumes/SD_CARD/Music /Volumes/SD_CARD/music.db -v --verify
 ```
 
+In `--source folder` mode the indexer assumes:
+```
+Music/
+└── Artist Name/
+    └── Album Name/
+        ├── 01 - Track Title.mp3
+        └── 02 - Another Track.m4a
+```
+Leading track-number prefixes (`"01 - "`, `"02. "`, `"3 "`, etc.) are stripped from filenames to produce clean titles.
+
 ---
 
 ## What the Indexer Does
 
-1. Recursively walks `music_folder` for `.mp3` files only; all other file types are skipped
+1. Recursively walks `music_folder` for `.mp3` and `.m4a` files; all other file types are skipped
 2. Skips macOS system files automatically (`.DS_Store`, `._*`, `.Spotlight-V100`, `.Trashes`, and any hidden file)
-3. Reads ID3 tags from each MP3 using `mutagen` — extracts title, artist, album, track number, year, and duration
-4. Falls back to `"Unknown Artist"` / `"Unknown Album"` / the filename if tags are missing
-5. Normalizes text: decomposes Unicode (removes accents), replaces smart quotes and dashes, strips non-printable characters — all metadata is stored as plain ASCII for reliable rendering on the ESP32 display
-6. Stores file paths as `Music/<relative_path>` — matching how the ESP32 opens files from the SD card root
-7. Commits to SQLite in batches of 100 songs to handle large libraries without memory pressure
-8. Prints a summary (artists, albums, songs indexed; errors; duplicates skipped)
+3. **MP3 files:** reads ID3 tags using `mutagen` — extracts title, artist, album, track number, year, and duration
+4. **M4A files:** reads iTunes metadata atoms using `mutagen`, then additionally parses the raw MP4 box structure to extract the AAC audio layout and JPEG cover art location needed for fast on-device playback (see [M4A Metadata Extraction](#m4a-metadata-extraction) below)
+5. Falls back to `"Unknown Artist"` / `"Unknown Album"` / the filename if tags are missing
+6. Normalizes text: decomposes Unicode (removes accents), replaces smart quotes and dashes, strips non-printable characters — all metadata is stored as plain ASCII for reliable rendering on the ESP32 display
+7. Stores file paths as `Music/<relative_path>` — matching how the ESP32 opens files from the SD card root
+8. Commits to SQLite in batches of 100 songs to handle large libraries without memory pressure
+9. Prints a summary (artists, albums, songs indexed; M4A metadata success/failure counts; M4A art count; errors; duplicates skipped)
+
+---
+
+## M4A Metadata Extraction
+
+For M4A files the indexer performs an additional binary parse of the MP4 box (atom) structure to extract nine fields that the ESP32 uses to begin playback instantly and display album art — without scanning the file at runtime:
+
+| Field | Description |
+|-------|-------------|
+| `mdat_start` | Byte offset where AAC audio data begins (after the `mdat` box header) |
+| `stsz_offset` | Byte offset of the `stsz` (sample size) box |
+| `sample_count` | Total number of audio samples in the file |
+| `fixed_size` | Fixed sample size in bytes (0 = variable-size samples) |
+| `aac_profile` | AAC audio object type (2 = AAC-LC) |
+| `aac_sr_idx` | Sample rate index (4 = 44 100 Hz, per ISO 14496-3 table) |
+| `aac_ch_cfg` | Channel configuration (2 = stereo) |
+| `covr_offset` | Byte offset where the JPEG cover art begins inside the file (0 = no art) |
+| `covr_size` | Byte count of the JPEG cover art data (0 = no art) |
+
+Without these fields the player would need to scan each M4A file from the beginning before starting playback (noticeable delay). With them, playback begins immediately.
+
+**What the parse covers:**
+
+- Recursively walks the MP4 box tree (`moov → trak → mdia → minf → stbl`)
+- Locates the `stsz` box to read sample count and fixed sample size
+- Locates the `mdat` box to record the audio data start offset
+- Locates the `esds` descriptor inside the `mp4a` audio sample entry and reads the two-byte `AudioSpecificConfig` word to decode profile, sample rate index, and channel config
+- Walks `moov → udta → meta → ilst → covr → data` to locate embedded JPEG cover art; records the byte offset and size if a JPEG-type (`0x0000000D`) data box is found
+
+If any box is missing or the parse fails, the fields default to 0 and a warning is printed. The player detects this and falls back to a full runtime file scan — playback still works, just with a brief delay at start.
+
+The `-v` / `--verbose` flag prints per-file parse results:
+
+```
+  ✅ mdat@120355 stsz@557 8753 samples profile=2 sr=44100Hz ch=2 covr@245120 (42316B JPEG)
+  ✅ mdat@98432 stsz@440 7201 samples profile=2 sr=44100Hz ch=2 no cover art
+```
+
+A summary line is always printed at the end:
+
+```
+M4A meta:  42/42 files parsed ✅ (fast startup)
+M4A art:   38/42 files have JPEG cover art 🖼️
+```
+
+or, if some files failed:
+
+```
+M4A meta:  39/42 files parsed ✅ (3 missing — those songs will scan at runtime)
+M4A art:   36/42 files have JPEG cover art 🖼️
+```
 
 ---
 
@@ -104,7 +174,7 @@ python3 music_indexer.py /Volumes/SD_CARD/Music /Volumes/SD_CARD/music.db -v --v
 
 ### Artist names appear as duplicates (e.g. "Beatles" and "The Beatles")
 
-The indexer uses the exact value from each file's ID3 `artist` tag. If your library has inconsistent tagging, you will see separate entries for each spelling.
+The indexer uses the exact value from each file's tag. If your library has inconsistent tagging, you will see separate entries for each spelling.
 
 **Fix:** Use a tag editor to normalize your library before indexing:
 - [MusicBrainz Picard](https://picard.musicbrainz.org/) — free, automatic tag matching against the MusicBrainz database
@@ -119,11 +189,20 @@ The indexer normalizes all text to printable ASCII (character codes 32–126). A
 
 ### The indexer is slow on a large library
 
-This is normal — reading ID3 tags from thousands of files over USB can take a few minutes. The indexer commits every 100 songs, so progress is not lost if interrupted. Re-running starts fresh (the old database is deleted first).
+This is normal — reading tags and parsing MP4 boxes from thousands of files over USB can take a few minutes. The indexer commits every 100 songs, so progress is not lost if interrupted. Re-running starts fresh (the old database is deleted first).
+
+### M4A files show "will scan at runtime" in the summary
+
+The indexer could not locate one or more required MP4 boxes (`mdat`, `stsz`, or `esds`). This can happen with:
+- Non-standard M4A encoders that use unusual box layouts
+- Files encoded with ALAC (lossless) rather than AAC — ALAC is not supported by the player
+- Corrupted or truncated M4A files
+
+Run with `--verbose` to see which files failed and why. The player will still play these songs; it just performs a short runtime scan of the file first.
 
 ### "Error reading" messages for certain files
 
-Files with corrupt ID3 tags or non-standard MP3 formatting may fail metadata extraction. The indexer skips these files and counts them as errors in the summary. Use `--verbose` to see exactly which files failed, then inspect them with a tag editor.
+Files with corrupt tags or non-standard formatting may fail metadata extraction. The indexer skips these files and counts them as errors in the summary. Use `--verbose` to see exactly which files failed, then inspect them with a tag editor.
 
 ### The ESP32 shows "Database Error — Run indexer tool"
 
@@ -159,7 +238,21 @@ CREATE TABLE songs (
     path         TEXT    NOT NULL UNIQUE,
     track_number INTEGER,
     duration     INTEGER,   -- seconds
-    file_size    INTEGER    -- bytes
+    file_size    INTEGER,   -- bytes
+
+    -- M4A / AAC layout metadata (populated for .m4a files; 0 for MP3)
+    -- Used by the ESP32 to begin playback instantly without scanning the file.
+    mdat_start   INTEGER DEFAULT 0,  -- byte offset of audio data start (after mdat header)
+    stsz_offset  INTEGER DEFAULT 0,  -- byte offset of the stsz (sample sizes) box
+    sample_count INTEGER DEFAULT 0,  -- total number of audio samples
+    fixed_size   INTEGER DEFAULT 0,  -- fixed sample size in bytes (0 = variable)
+    aac_profile  INTEGER DEFAULT 2,  -- AAC audio object type (2 = AAC-LC)
+    aac_sr_idx   INTEGER DEFAULT 4,  -- sample rate index per ISO 14496-3 (4 = 44100 Hz)
+    aac_ch_cfg   INTEGER DEFAULT 2,  -- channel configuration (2 = stereo)
+
+    -- M4A cover art location (populated for .m4a files with embedded JPEG; 0 otherwise)
+    covr_offset  INTEGER DEFAULT 0,  -- byte offset of JPEG data inside the .m4a file
+    covr_size    INTEGER DEFAULT 0   -- byte count of JPEG data (0 = no art)
 );
 
 -- Indexes for fast lookup
@@ -169,7 +262,7 @@ CREATE INDEX idx_songs_album ON songs(album_id);
 CREATE INDEX idx_songs_title ON songs(title);
 ```
 
-The ESP32 loads this database entirely into PSRAM at boot using `sqlite3_deserialize()`, then runs all queries in memory for instant response times.
+The ESP32 loads this database entirely into PSRAM at boot using `sqlite3_deserialize()`, then runs all queries in memory for instant response times. The nine M4A layout columns (seven for audio layout, two for cover art) are loaded alongside title/path/duration when a song list is opened — no extra queries at playback time.
 
 ---
 

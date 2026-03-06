@@ -148,10 +148,7 @@ void updateBattery() {
     batteryVoltage = sum / count;
     batteryPercent = getBatteryPercent();
     batteryCharging = isBatteryCharging();
-    
-    // Trigger display update for battery status
-    displayNeedsUpdate = true;
-    
+
     #ifdef DEBUG
     Serial.printf("🔋 Battery: %.2fV (%d%%) Rate: %.4fV/s", 
                   batteryVoltage, batteryPercent, voltageChangeRate);

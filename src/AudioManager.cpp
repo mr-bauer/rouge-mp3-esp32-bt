@@ -10,9 +10,230 @@
 #include "AudioTools/Communication/A2DPStream.h"
 #include "AudioTools/Disk/AudioSourceSDFAT.h"
 #include "AudioTools/AudioCodecs/CodecMP3Helix.h"
+#include "AudioTools/AudioCodecs/CodecAACHelix.h"
+#include "AudioTools/AudioCodecs/M4ACommonDemuxer.h"
 
 #include <SdFat.h>
 #include "esp_a2dp_api.h"
+
+// ============================================================================
+// M4A FILE DEMUXER — SdFat File32 based, handles both faststart and
+// non-faststart M4A files via random file access (avoids the library's
+// assert(written == box.available) that fires when mdat precedes stsz).
+// ============================================================================
+using namespace audio_tools;
+
+class M4AFile32Demuxer : public M4ACommonDemuxer {
+public:
+    M4AFile32Demuxer() { setupParser(); }
+
+    // Open using pre-stored layout metadata from the DB (no file scan).
+    // Falls back to full open() scan if metadata is missing/invalid.
+    bool openWithMeta(File32& file, AACDecoderHelix& dec, const Song& song) {
+        if (song.mdatStart == 0 || song.stszOffset == 0 || song.sampleCount == 0) {
+            Serial.println("   ⚠️ No DB metadata — falling back to full M4A scan");
+            return open(file, dec);
+        }
+
+        p_file         = &file;
+        p_dec          = &dec;
+        mdat_start     = song.mdatStart;
+        mdat_cur       = song.mdatStart;
+        samp_idx       = 0;
+        fixed_size     = song.fixedSize;
+        sample_count   = song.sampleCount;
+        stsz_offset    = (uint32_t)song.stszOffset;
+        stsz_data_off  = (uint64_t)song.stszOffset + 20;  // data starts after 20-byte header
+        stsz_buf_valid = 0;
+        stsz_buf_pos   = 0;
+
+        // Apply stored AAC config (skips esds parsing entirely)
+        audio_config.aacProfile    = song.aacProfile;
+        audio_config.sampleRateIdx = song.aacSrIdx;
+        audio_config.channelCfg    = song.aacChCfg;
+
+        Serial.printf("✅ M4A (DB meta): %u samples, profile=%d sr_idx=%d ch=%d\n",
+                      sample_count, audio_config.aacProfile,
+                      audio_config.sampleRateIdx, audio_config.channelCfg);
+        return true;
+    }
+
+    // Open and pre-scan the M4A file. Works for faststart (moov first) and
+    // non-faststart (mdat first) files. Returns true on success.
+    bool open(File32& file, AACDecoderHelix& dec) {
+        p_file         = &file;
+        p_dec          = &dec;
+        mdat_start     = 0;
+        mdat_cur       = 0;
+        samp_idx       = 0;
+        fixed_size     = 0;
+        stsz_data_off  = 0;
+        stsz_buf_valid = 0;
+        stsz_buf_pos   = 0;
+
+        M4ACommonDemuxer::begin();  // resets stsd_processed, audio_config, sample_count
+        setupParser();              // re-register callbacks after parser.begin()
+
+        if (!preParseFile()) {
+            Serial.println("❌ M4A: failed to parse file structure");
+            return false;
+        }
+        if (!readStszHeader()) {
+            Serial.println("❌ M4A: failed to read stsz header");
+            return false;
+        }
+        mdat_cur = mdat_start;
+        Serial.printf("✅ M4A: %u samples, profile=%d sr_idx=%d ch=%d\n",
+                      sample_count, audio_config.aacProfile,
+                      audio_config.sampleRateIdx, audio_config.channelCfg);
+        return sample_count > 0 && mdat_start > 0;
+    }
+
+    // Call every audioLoop() iteration. Returns true while frames remain.
+    bool copy() {
+        if (!p_file || samp_idx >= sample_count) return false;
+
+        uint32_t fsize = nextFrameSize();
+        if (fsize == 0 || fsize > 65536) return false;   // sanity
+
+        // Ensure frame buffer is large enough for ADTS header (7) + raw frame
+        if (frame_buf.size() < fsize + 7) frame_buf.resize(fsize + 7);
+
+        // Write 7-byte ADTS header
+        writeAdts(frame_buf.data(), audio_config.aacProfile,
+                  audio_config.sampleRateIdx, audio_config.channelCfg, fsize);
+
+        // Seek to current mdat position and read the raw AAC frame
+        if (!p_file->seek(mdat_cur)) return false;
+        if ((size_t)p_file->read(frame_buf.data() + 7, fsize) != fsize) return false;
+
+        // Feed ADTS-wrapped frame to decoder; PCM output goes to `out` buffer
+        p_dec->write(frame_buf.data(), fsize + 7);
+
+        mdat_cur += fsize;
+        samp_idx++;
+        return true;
+    }
+
+    void close() {
+        p_file   = nullptr;
+        samp_idx = 0;
+    }
+
+    bool isActive() const { return p_file && samp_idx < sample_count; }
+
+protected:
+    void setupParser() override {
+        parser.setReference(this);
+        parser.setCallback("mp4a", [](MP4Parser::Box& box, void* ref) {
+            static_cast<M4AFile32Demuxer*>(ref)->onMp4a(box);
+        }, false);
+        parser.setCallback("esds", [](MP4Parser::Box& box, void* ref) {
+            static_cast<M4AFile32Demuxer*>(ref)->onEsds(box);
+        }, false);
+        parser.setCallback("alac", [](MP4Parser::Box& box, void* ref) {
+            static_cast<M4AFile32Demuxer*>(ref)->onAlac(box);
+        }, false);
+        parser.setCallback("stsd", [](MP4Parser::Box& box, void* ref) {
+            auto* self = static_cast<M4AFile32Demuxer*>(ref);
+            self->onStsd(box);
+            self->stsd_processed = true;
+        }, false);
+        parser.setCallback("stsz", [](MP4Parser::Box& box, void* ref) {
+            // Record box offset; do NOT buffer all sizes into RAM
+            auto* self = static_cast<M4AFile32Demuxer*>(ref);
+            if (box.seq == 0) self->stsz_offset = (uint32_t)box.file_offset;
+        }, false);
+        parser.setCallback("mdat", [](MP4Parser::Box& box, void* ref) {
+            // Record data start ONLY — do not call sampleExtractor.write()
+            // (that's the library code path that has the crash-inducing assert)
+            auto* self = static_cast<M4AFile32Demuxer*>(ref);
+            if (box.seq == 0) self->mdat_start = (uint64_t)box.file_offset + 8;
+        }, false);
+    }
+
+    // Feed the file into the MP4 parser until all three positions are found.
+    // yield() prevents watchdog expiry while streaming through large mdat
+    // boxes in non-faststart files.
+    bool preParseFile() {
+        uint8_t buf[512];
+        p_file->seek(0);
+        while (p_file->available()) {
+            yield();
+            int space = parser.availableForWrite();
+            if (space <= 0) { vTaskDelay(1); continue; }
+            int to_read = min((int)sizeof(buf), space);
+            size_t len  = p_file->read(buf, to_read);
+            if (len == 0) break;
+            parser.write(buf, len);
+            if (stsd_processed && stsz_offset && mdat_start) return true;
+        }
+        return stsd_processed && stsz_offset && mdat_start;
+    }
+
+    // Read fixed_size and sample_count from the stsz box header.
+    // stsz layout: [4 box_size][4 "stsz"][4 ver+flags][4 sample_size][4 sample_count]
+    bool readStszHeader() {
+        if (stsz_offset == 0) return false;
+        uint8_t hdr[20];
+        if (!p_file->seek(stsz_offset)) return false;
+        if ((size_t)p_file->read(hdr, 20) != 20) return false;
+        if (!checkType(hdr, "stsz", 4)) return false;
+        fixed_size    = readU32(hdr + 12);
+        sample_count  = readU32(hdr + 16);
+        stsz_data_off = (uint64_t)stsz_offset + 20;   // first entry byte offset
+        return true;
+    }
+
+    // Return the next frame size, reading from the stsz table in batches
+    // to minimise SD card seeks.
+    uint32_t nextFrameSize() {
+        if (fixed_size) return fixed_size;
+        if (stsz_buf_pos >= stsz_buf_valid) {
+            uint64_t entry_pos = stsz_data_off + (uint64_t)samp_idx * 4;
+            if (!p_file->seek(entry_pos)) return 0;
+            int to_fetch   = min((int)STSZ_BATCH, (int)(sample_count - samp_idx));
+            stsz_buf_valid = p_file->read(stsz_buf, to_fetch * 4) / 4;
+            stsz_buf_pos   = 0;
+            if (stsz_buf_valid == 0) return 0;
+            // Convert big-endian to host byte order
+            for (int i = 0; i < stsz_buf_valid; i++) {
+                auto* b = reinterpret_cast<uint8_t*>(&stsz_buf[i]);
+                stsz_buf[i] = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16)
+                            | ((uint32_t)b[2] <<  8) |  b[3];
+            }
+        }
+        return stsz_buf[stsz_buf_pos++];
+    }
+
+    static void writeAdts(uint8_t* adts, int profile, int srIdx, int chCfg,
+                          uint32_t frameLen) {
+        uint32_t total = frameLen + 7;
+        adts[0] = 0xFF;
+        adts[1] = 0xF1;   // MPEG-4 AAC, no CRC
+        adts[2] = (uint8_t)(((profile - 1) << 6) | (srIdx << 2) | ((chCfg >> 2) & 1));
+        adts[3] = (uint8_t)(((chCfg & 3) << 6) | ((total >> 11) & 3));
+        adts[4] = (uint8_t)((total >> 3) & 0xFF);
+        adts[5] = (uint8_t)(((total & 7) << 5) | 0x1F);
+        adts[6] = 0xFC;
+    }
+
+private:
+    File32*          p_file        = nullptr;
+    AACDecoderHelix* p_dec         = nullptr;
+    uint64_t         mdat_start    = 0;    // byte offset where mdat data begins
+    uint64_t         mdat_cur      = 0;    // current read head in mdat
+    uint32_t         samp_idx      = 0;    // current sample index
+    uint32_t         fixed_size    = 0;    // 0 = variable, >0 = fixed per frame
+    uint64_t         stsz_data_off = 0;    // file offset to first stsz entry
+
+    static const int STSZ_BATCH = 64;
+    uint32_t stsz_buf[STSZ_BATCH];
+    int stsz_buf_valid = 0;
+    int stsz_buf_pos   = 0;
+
+    SingleBuffer<uint8_t> frame_buf{0};    // ADTS header + raw AAC frame
+};
 
 const char *startFilePath = "/";
 const char *ext = "mp3";
@@ -26,11 +247,23 @@ MP3DecoderHelix decoder;
 MetaDataFilterDecoder filtered_mp3(decoder);
 AudioSourceSDFAT<SdFat32, File32> source(startFilePath, ext, 32);
 AudioPlayer player(source, out, filtered_mp3);  // filtered_mp3 strips metadata frames before Helix sees them
+
+// M4A / AAC decoder chain (file-based, bypasses the streaming-demuxer assert)
+AACDecoderHelix  aac_decoder;
+VolumeStream     m4a_vol;          // volume control for M4A output
+M4AFile32Demuxer m4a_demuxer;
+File32           m4a_file;
+bool             m4aActive = false;
+
 BluetoothA2DPSource a2dp;
 
 // State tracking
 String last_device_name = headphoneName;
 unsigned long last_watchdog_check = 0;
+
+// MAC address cache for scan results — lets us use reconnect() by MAC instead of start(name)
+struct BTDeviceMAC { std::string name; uint8_t mac[6]; };
+static std::vector<BTDeviceMAC> btFoundMACs;
 
 // Volume saving - NEW
 unsigned long lastVolumeSaveTime = 0;
@@ -52,21 +285,86 @@ int32_t get_sound_data(uint8_t* data, int32_t bytes) {
 }
 
 // ============================================================================
+// BLUETOOTH DEVICE SCAN CALLBACKS
+// ============================================================================
+
+// Shared helper: cache a device MAC if not already stored
+static void cacheBTDeviceMAC(const char* name, esp_bd_addr_t addr) {
+    for (const auto& d : btFoundMACs) {
+        if (d.name == name) return;  // already cached
+    }
+    BTDeviceMAC entry;
+    entry.name = std::string(name);
+    memcpy(entry.mac, addr, 6);
+    btFoundMACs.push_back(entry);
+}
+
+// Called during the initial boot scan — stores every found device's MAC in the
+// session cache and returns true for the target device to trigger connection.
+static bool btBootScanCallback(const char* name, esp_bd_addr_t addr, int rssi) {
+    if (name && strlen(name) > 0) {
+        cacheBTDeviceMAC(name, addr);
+        Serial.printf("[BT Boot] Seen: %s\n", name);
+    }
+    return (name && last_device_name == name);  // connect only to target
+}
+
+// Called for each device found during BT inquiry; return false = don't connect
+static bool btScanCallback(const char* name, esp_bd_addr_t addr, int rssi) {
+    if (name && strlen(name) > 0) {
+        for (const auto& n : btFoundDevices) {
+            if (n == name) return false;
+        }
+        btFoundDevices.push_back(std::string(name));
+        cacheBTDeviceMAC(name, addr);
+        Serial.printf("[BT Scan] Found: %s (RSSI: %d)\n", name, rssi);
+        if (currentMenu == MENU_BT_SCAN) {
+            buildBTScanMenu();
+            displayNeedsUpdate = true;
+        }
+    }
+    return false;  // never auto-connect during scan
+}
+
+// Called when inquiry starts or stops
+static void btDiscoveryModeCallback(esp_bt_gap_discovery_state_t discoveryMode) {
+    if (discoveryMode == ESP_BT_GAP_DISCOVERY_STOPPED) {
+        Serial.println("[BT Scan] Discovery complete");
+        btScanning = false;
+        a2dp.set_ssid_callback(nullptr);
+        a2dp.set_discovery_mode_callback(nullptr);
+        if (currentMenu == MENU_BT_SCAN) {
+            buildBTScanMenu();
+            forceDisplayRedraw = true;  // clear overlay, repaint full list
+            displayNeedsUpdate = true;
+        }
+    }
+}
+
+// ============================================================================
 // BLUETOOTH CALLBACKS
 // ============================================================================
 
 void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
     Serial.printf("[BT] Connection state changed: ");
-    
+
     switch (state) {
         case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
             Serial.println("DISCONNECTED");
             bluetoothConnected = false;
-            
+
             // Stop playback and clear buffer on disconnect
             if (player_state != STATE_STOPPED) {
                 Serial.println("[PLAYER] Stopping due to disconnect");
                 player_state = STATE_STOPPED;
+                if (m4aActive) {
+                    m4a_demuxer.close();
+                    aac_decoder.end();
+                    m4a_file.close();
+                    m4aActive = false;
+                } else if (player.isActive()) {
+                    player.stop();
+                }
                 buffer.reset();
                 delay(10);
                 a2dp.disconnect();
@@ -74,23 +372,41 @@ void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
                 // Send back to Main Menu
                 currentMenu = MENU_MAIN;
                 buildMainMenu();
-                displayNeedsUpdate = true;
                 delay(10);
             }
+            // Always refresh display — status row and Disconnect item must update
+            if (currentMenu == MENU_BLUETOOTH) buildBluetoothMenu();
+            forceDisplayRedraw = true;
+            displayNeedsUpdate = true;
             break;
-            
+
         case ESP_A2D_CONNECTION_STATE_CONNECTING:
             Serial.println("CONNECTING...");
+            if (currentMenu == MENU_BLUETOOTH) {
+                buildBluetoothMenu();
+                displayNeedsUpdate = true;
+            }
             break;
-            
+
         case ESP_A2D_CONNECTION_STATE_CONNECTED:
             Serial.println("CONNECTED");
             bluetoothConnected = true;
-            
-            // Save device name for reconnection
-            // Note: get_peer_name() may not exist in all versions
-            // We'll use the name we connected to instead
-            last_device_name = headphoneName;
+            // Boot scan callback is no longer needed once connected
+            a2dp.set_ssid_callback(nullptr);
+
+            // Save to single-device key (backward compat) and saved list.
+            // Also persist the MAC so reconnect() works after a power cycle.
+            rougePrefs.saveBTDevice(last_device_name.c_str());
+            {
+                const uint8_t* mac = nullptr;
+                for (const auto& d : btFoundMACs)
+                    if (d.name == last_device_name.c_str()) { mac = d.mac; break; }
+                rougePrefs.addBTDevice(last_device_name.c_str(), mac);
+            }
+            btSavedDevices = rougePrefs.loadBTDeviceList();
+            if (currentMenu == MENU_BLUETOOTH) buildBluetoothMenu();
+            forceDisplayRedraw = true;
+            displayNeedsUpdate = true;
             Serial.printf("[BT] Connected to: %s\n", last_device_name.c_str());
             break;
             
@@ -202,11 +518,16 @@ void stopPlayback() {
     
     Serial.println("[PLAYER] Stopping...");
     
-    // Stop the player
-    if (player.isActive()) {
+    // Stop the active decoder
+    if (m4aActive) {
+        m4a_demuxer.close();
+        aac_decoder.end();
+        m4a_file.close();
+        m4aActive = false;
+    } else if (player.isActive()) {
         player.stop();
     }
-    
+
     // Clear the buffer
     buffer.reset();
     
@@ -214,6 +535,10 @@ void stopPlayback() {
     player_state = STATE_STOPPED;
     
     Serial.println("[PLAYER] Stopped");
+}
+
+void setM4AVolume(float vol) {
+    m4a_vol.setVolume(vol);
 }
 
 // ============================================================================
@@ -254,19 +579,69 @@ void disconnectBluetooth() {
 
 void changeBluetoothDevice(const String& new_device_name) {
     Serial.printf("[BT] Changing device to: %s\n", new_device_name.c_str());
-    
+
+    // Clear scan callbacks immediately so they don't interfere with connection
+    a2dp.set_ssid_callback(nullptr);
+    a2dp.set_discovery_mode_callback(nullptr);
+    btScanning = false;
+
+    // Stop playback and disconnect cleanly
+    if (player_state != STATE_STOPPED) stopPlayback();
+    if (bluetoothConnected) {
+        a2dp.disconnect();
+        delay(1000);
+    }
+
+    last_device_name = new_device_name;
+
+    // If this device was found in the last scan we have its MAC address.
+    // Use set_auto_reconnect(mac) + reconnect() to connect directly by MAC —
+    // this avoids calling start() again which would re-run STACK_UP, double-init
+    // esp_a2d_source_init(), and create a second heartbeat timer that times out
+    // the CONNECTING state before CONNECTED ever fires.
+    for (const auto& d : btFoundMACs) {
+        if (d.name == new_device_name.c_str()) {
+            Serial.println("[BT] MAC known from scan — connecting by address");
+            a2dp.set_auto_reconnect(const_cast<uint8_t*>(d.mac));
+            break;
+        }
+    }
+
+    // reconnect() uses last_connection: set above via set_auto_reconnect(mac),
+    // or the MAC already stored from the most recent successful connection.
+    if (!a2dp.reconnect()) {
+        // No MAC available (cold boot, first-ever device) — fall back to name scan.
+        // This path is only taken when has_last_connection() returns false.
+        Serial.println("[BT] No MAC available, falling back to name-based start()");
+        a2dp.start(last_device_name.c_str());
+    }
+    Serial.println("[BT] Connecting...");
+}
+
+void startBTScan() {
+    if (btScanning) return;
+
+    // Stop playback if active
+    if (player_state != STATE_STOPPED) stopPlayback();
+
     // Disconnect if connected
     if (bluetoothConnected) {
         disconnectBluetooth();
-        delay(1000);  // Wait for clean disconnect
+        delay(500);
     }
-    
-    // Update device name
-    last_device_name = new_device_name;
-    
-    // Start connection to new device
-    a2dp.start(last_device_name.c_str());
-    Serial.println("[BT] Connecting to new device...");
+
+    btFoundDevices.clear();   // clear display list for each scan
+    // btFoundMACs is a persistent session cache — NOT cleared here so boot
+    // device MACs (captured by btBootScanCallback) survive across scans
+    btScanning = true;
+
+    // Set callbacks: collect all found devices, never auto-connect
+    a2dp.set_ssid_callback(btScanCallback);
+    a2dp.set_discovery_mode_callback(btDiscoveryModeCallback);
+
+    // start() with empty name list = scan all BT devices in range
+    a2dp.start();
+    Serial.println("[BT Scan] Scanning for nearby devices...");
 }
 
 void initAudio()
@@ -279,15 +654,28 @@ void initAudio()
 
     source.begin();
     out.begin(60);
-    player.setDelayIfOutputFull(0);
-    
-    // Load saved volume - NEW
+
+    // Load saved volume
     currentVolume = rougePrefs.loadVolume();
-    player.setVolume(currentVolume / 100.0f);
     Serial.printf("🔊 Volume set to %d%%\n", currentVolume);
-    
+
+    // Configure MP3 player
+    player.setDelayIfOutputFull(0);
+    player.setVolume(currentVolume / 100.0f);
     player.setAutoNext(false);
-    player.setAutoFade(false);  // Disabled: auto-fades are unnecessary for this use case
+    player.setAutoFade(false);
+
+    // Pre-wire the AAC decoder output through a VolumeStream for M4A playback
+    {
+        AudioInfo m4a_fmt;
+        m4a_fmt.sample_rate    = 44100;
+        m4a_fmt.channels       = 2;
+        m4a_fmt.bits_per_sample = 16;
+        m4a_vol.setOutput(out);
+        m4a_vol.begin(m4a_fmt);
+        m4a_vol.setVolume(currentVolume / 100.0f);
+        aac_decoder.setOutput(m4a_vol);
+    }
 
     Serial.println("\n[BT] Configuring Bluetooth A2DP Source...");
     a2dp.set_data_callback(get_sound_data);
@@ -296,8 +684,34 @@ void initAudio()
 
     a2dp.set_auto_reconnect(false);
     Serial.println("[BT] Auto-reconnect: DISABLED");
-    
-    a2dp.start(headphoneName);
+
+    // Load saved device name from NVS; fall back to hardcoded default
+    String savedDevice = rougePrefs.loadBTDevice();
+    last_device_name = savedDevice.isEmpty() ? String(headphoneName) : savedDevice;
+    Serial.printf("[BT] Connecting to: %s\n", last_device_name.c_str());
+    // Pre-populate MAC cache from NVS so reconnect() works immediately for any
+    // saved device even before the boot scan finds it in the air.
+    {
+        auto names = rougePrefs.loadBTDeviceList();
+        auto hexes = rougePrefs.loadBTMACList();
+        for (int i = 0; i < (int)names.size() && i < (int)hexes.size(); i++) {
+            if (hexes[i].size() == 12) {
+                BTDeviceMAC entry;
+                entry.name = names[i];
+                for (int j = 0; j < 6; j++) {
+                    char b[3] = { hexes[i][j*2], hexes[i][j*2+1], '\0' };
+                    entry.mac[j] = (uint8_t)strtol(b, nullptr, 16);
+                }
+                btFoundMACs.push_back(entry);
+                Serial.printf("[BT] Loaded MAC for %s from NVS\n", names[i].c_str());
+            }
+        }
+    }
+
+    // Boot scan callback: caches every found device's MAC so reconnect() works
+    // by address for any device seen this session — including the boot target.
+    a2dp.set_ssid_callback(btBootScanCallback);
+    a2dp.start(last_device_name.c_str());
     Serial.println("✅ A2DP Started!");
     bluetoothConnected = false;
     btStatus = "BT Disconnected";
@@ -309,24 +723,32 @@ void audioLoop()
 {
     // Feed buffer when playing
     if (player_state == STATE_PLAYING && bluetoothConnected) {
-        size_t copied = 0;
-        
-        try {
-            copied = player.copy();
-        } catch (...) {
-            Serial.println("❌ Audio copy exception! Stopping and skipping...");
-            player_state = STATE_STOPPED;
-            player.stop();
-            buffer.reset();
-            delay(50);
-            autoNext();
-            return;
-        }
-        
-        if (copied == 0)
-        {
-            Serial.println("📀 End of file reached (song finished)");    
-            autoNext();
+        if (m4aActive) {
+            // M4A: file-based frame decode — only run when buffer has space
+            if (buffer.availableForWrite() > 8192) {
+                if (!m4a_demuxer.copy()) {
+                    Serial.println("📀 M4A: End of file (song finished)");
+                    autoNext();
+                }
+            }
+        } else {
+            // MP3: AudioPlayer-based decode
+            size_t copied = 0;
+            try {
+                copied = player.copy();
+            } catch (...) {
+                Serial.println("❌ Audio copy exception! Stopping and skipping...");
+                player_state = STATE_STOPPED;
+                player.stop();
+                buffer.reset();
+                delay(50);
+                autoNext();
+                return;
+            }
+            if (copied == 0) {
+                Serial.println("📀 End of file reached (song finished)");
+                autoNext();
+            }
         }
     }
     
@@ -368,19 +790,38 @@ void playCurrentSong(bool updateDisplay)
     }
 
     currentTitle = song.title;
-    
-    Serial.printf("▶️ Playing: %s\n", song.title.c_str());
-    Serial.printf("   Path: %s\n", song.path.c_str());
 
-    // CRITICAL: Ensure we're in a clean state before starting
-    // The caller should have called stopPlayback() first for different songs
-    // But double-check here as a safety measure
+    // Detect format from file extension (.m4a → M4A/AAC chain; anything else → MP3)
+    bool isM4A = false;
+    {
+        const std::string& p = song.path;
+        if (p.size() >= 4) {
+            const char* tail = p.c_str() + p.size() - 4;
+            isM4A = (tail[0] == '.' &&
+                     tolower((unsigned char)tail[1]) == 'm' &&
+                     tail[2] == '4' &&
+                     tolower((unsigned char)tail[3]) == 'a');
+        }
+    }
+
+    Serial.printf("▶️ Playing: %s\n", song.title.c_str());
+    Serial.printf("   Path: %s  Format: %s\n", song.path.c_str(), isM4A ? "M4A" : "MP3");
+
+    // Clean up any previous M4A state
+    if (m4aActive) {
+        m4a_demuxer.close();
+        aac_decoder.end();
+        m4a_file.close();
+        m4aActive = false;
+    }
+
+    // Stop MP3 player if it was running
     if (player.isActive()) {
         Serial.println("   ⚠️ Player still active, stopping first");
         player.stop();
         delay(100);
     }
-    
+
     // Reset buffer to ensure clean start
     buffer.reset();
 
@@ -389,39 +830,59 @@ void playCurrentSong(bool updateDisplay)
     totalPausedMs       = 0;
     pauseStartMillis    = 0;
 
-    // Load album art from ID3 tags using audio source's SdFat32 instance
-    loadAlbumArt(source.getAudioFs(), song.path.c_str());
+    // Load album art: M4A uses pre-indexed offset/size for instant seek; MP3 scans ID3 tags
+    loadAlbumArt(source.getAudioFs(), song.path.c_str(), song.covrOffset, song.covrSize);
 
     Serial.println("   Opening file...");
-    try {
-        if (!player.setPath(song.path.c_str())) {
-            Serial.printf("❌ Could not open file: %s\n", song.path.c_str());
+
+    if (isM4A) {
+        // --- M4A / AAC path: file-based demuxer, no AudioPlayer ---
+        m4a_file = source.getAudioFs().open(song.path.c_str());
+        if (!m4a_file) {
+            Serial.printf("❌ Cannot open M4A: %s\n", song.path.c_str());
             currentTitle = "Error: Cannot open";
             displayNeedsUpdate = true;
             autoNext();
             return;
         }
-
-        // MetaDataFilterDecoder intercepts the setAudioInfo() notification that
-        // the Helix decoder emits after parsing the first frame, so AudioPlayer's
-        // internal FadeStream never gets initialized and rejects all audio data.
-        // BT A2DP always requires 44100/2ch/16-bit, so we can safely provide it here.
-        AudioInfo btFormat;
-        btFormat.sample_rate = 44100;
-        btFormat.channels = 2;
-        btFormat.bits_per_sample = 16;
-        player.setAudioInfo(btFormat);
-
-        Serial.println("   Starting playback...");
-        player.play();
-    } catch (...) {
-        Serial.printf("❌ Exception opening/starting: %s\n", song.path.c_str());
-        currentTitle = "Error: Bad file";
-        displayNeedsUpdate = true;
-        autoNext();
-        return;
+        aac_decoder.begin();
+        if (!m4a_demuxer.openWithMeta(m4a_file, aac_decoder, song)) {
+            Serial.println("❌ Failed to parse M4A structure");
+            m4a_file.close();
+            aac_decoder.end();
+            currentTitle = "Error: Bad M4A";
+            displayNeedsUpdate = true;
+            autoNext();
+            return;
+        }
+        m4aActive    = true;
+        player_state = STATE_PLAYING;
+    } else {
+        // --- MP3 path: AudioPlayer as before ---
+        try {
+            if (!player.setPath(song.path.c_str())) {
+                Serial.printf("❌ Could not open file: %s\n", song.path.c_str());
+                currentTitle = "Error: Cannot open";
+                displayNeedsUpdate = true;
+                autoNext();
+                return;
+            }
+            AudioInfo btFormat;
+            btFormat.sample_rate    = 44100;
+            btFormat.channels       = 2;
+            btFormat.bits_per_sample = 16;
+            player.setAudioInfo(btFormat);
+            Serial.println("   Starting playback...");
+            player.play();
+        } catch (...) {
+            Serial.printf("❌ Exception opening/starting: %s\n", song.path.c_str());
+            currentTitle = "Error: Bad file";
+            displayNeedsUpdate = true;
+            autoNext();
+            return;
+        }
+        player_state = STATE_PLAYING;
     }
-    player_state = STATE_PLAYING;
     
     Serial.println("✅ Playback started");
     
