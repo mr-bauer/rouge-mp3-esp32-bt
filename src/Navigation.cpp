@@ -44,8 +44,9 @@ void handleButtonPress(int buttonIndex)
 void handleCenter()
 {
   // Handle menu selections
-  if (currentMenu == MENU_MAIN || currentMenu == MENU_MUSIC || 
-      currentMenu == MENU_SETTINGS || currentMenu == MENU_BLUETOOTH)
+  if (currentMenu == MENU_MAIN || currentMenu == MENU_MUSIC ||
+      currentMenu == MENU_SETTINGS || currentMenu == MENU_BLUETOOTH ||
+      currentMenu == MENU_BT_SCAN)
   {
     if (menuIndex >= 0 && menuIndex < (int)currentMenuItems.size()) {
       MenuItem& item = currentMenuItems[menuIndex];

@@ -261,6 +261,10 @@ BluetoothA2DPSource a2dp;
 String last_device_name = headphoneName;
 unsigned long last_watchdog_check = 0;
 
+// MAC address cache for scan results — lets us use reconnect() by MAC instead of start(name)
+struct BTDeviceMAC { std::string name; uint8_t mac[6]; };
+static std::vector<BTDeviceMAC> btFoundMACs;
+
 // Volume saving - NEW
 unsigned long lastVolumeSaveTime = 0;
 int lastSavedVolume = -1;
@@ -284,6 +288,27 @@ int32_t get_sound_data(uint8_t* data, int32_t bytes) {
 // BLUETOOTH DEVICE SCAN CALLBACKS
 // ============================================================================
 
+// Shared helper: cache a device MAC if not already stored
+static void cacheBTDeviceMAC(const char* name, esp_bd_addr_t addr) {
+    for (const auto& d : btFoundMACs) {
+        if (d.name == name) return;  // already cached
+    }
+    BTDeviceMAC entry;
+    entry.name = std::string(name);
+    memcpy(entry.mac, addr, 6);
+    btFoundMACs.push_back(entry);
+}
+
+// Called during the initial boot scan — stores every found device's MAC in the
+// session cache and returns true for the target device to trigger connection.
+static bool btBootScanCallback(const char* name, esp_bd_addr_t addr, int rssi) {
+    if (name && strlen(name) > 0) {
+        cacheBTDeviceMAC(name, addr);
+        Serial.printf("[BT Boot] Seen: %s\n", name);
+    }
+    return (name && last_device_name == name);  // connect only to target
+}
+
 // Called for each device found during BT inquiry; return false = don't connect
 static bool btScanCallback(const char* name, esp_bd_addr_t addr, int rssi) {
     if (name && strlen(name) > 0) {
@@ -291,6 +316,7 @@ static bool btScanCallback(const char* name, esp_bd_addr_t addr, int rssi) {
             if (n == name) return false;
         }
         btFoundDevices.push_back(std::string(name));
+        cacheBTDeviceMAC(name, addr);
         Serial.printf("[BT Scan] Found: %s (RSSI: %d)\n", name, rssi);
         if (currentMenu == MENU_BT_SCAN) {
             buildBTScanMenu();
@@ -346,24 +372,41 @@ void connection_state_changed(esp_a2d_connection_state_t state, void* ptr) {
                 // Send back to Main Menu
                 currentMenu = MENU_MAIN;
                 buildMainMenu();
-                displayNeedsUpdate = true;
                 delay(10);
             }
+            // Always refresh display — status row and Disconnect item must update
+            if (currentMenu == MENU_BLUETOOTH) buildBluetoothMenu();
+            forceDisplayRedraw = true;
+            displayNeedsUpdate = true;
             break;
 
         case ESP_A2D_CONNECTION_STATE_CONNECTING:
             Serial.println("CONNECTING...");
+            if (currentMenu == MENU_BLUETOOTH) {
+                buildBluetoothMenu();
+                displayNeedsUpdate = true;
+            }
             break;
 
         case ESP_A2D_CONNECTION_STATE_CONNECTED:
             Serial.println("CONNECTED");
             bluetoothConnected = true;
+            // Boot scan callback is no longer needed once connected
+            a2dp.set_ssid_callback(nullptr);
 
-            // Save to single-device key (backward compat) and saved list
+            // Save to single-device key (backward compat) and saved list.
+            // Also persist the MAC so reconnect() works after a power cycle.
             rougePrefs.saveBTDevice(last_device_name.c_str());
-            rougePrefs.addBTDevice(last_device_name.c_str());
+            {
+                const uint8_t* mac = nullptr;
+                for (const auto& d : btFoundMACs)
+                    if (d.name == last_device_name.c_str()) { mac = d.mac; break; }
+                rougePrefs.addBTDevice(last_device_name.c_str(), mac);
+            }
             btSavedDevices = rougePrefs.loadBTDeviceList();
-            buildBluetoothMenu();  // refresh so saved list is current if user is in BT menu
+            if (currentMenu == MENU_BLUETOOTH) buildBluetoothMenu();
+            forceDisplayRedraw = true;
+            displayNeedsUpdate = true;
             Serial.printf("[BT] Connected to: %s\n", last_device_name.c_str());
             break;
             
@@ -542,17 +585,37 @@ void changeBluetoothDevice(const String& new_device_name) {
     a2dp.set_discovery_mode_callback(nullptr);
     btScanning = false;
 
-    // Disconnect if connected
+    // Stop playback and disconnect cleanly
+    if (player_state != STATE_STOPPED) stopPlayback();
     if (bluetoothConnected) {
-        disconnectBluetooth();
-        delay(1000);  // Wait for clean disconnect
+        a2dp.disconnect();
+        delay(1000);
     }
 
-    // Connect to new device — stack stays up, just start() with the new name.
-    // Scan callbacks were already cleared above so btScanCallback can't veto the connection.
     last_device_name = new_device_name;
-    a2dp.start(last_device_name.c_str());
-    Serial.println("[BT] Connecting to new device...");
+
+    // If this device was found in the last scan we have its MAC address.
+    // Use set_auto_reconnect(mac) + reconnect() to connect directly by MAC —
+    // this avoids calling start() again which would re-run STACK_UP, double-init
+    // esp_a2d_source_init(), and create a second heartbeat timer that times out
+    // the CONNECTING state before CONNECTED ever fires.
+    for (const auto& d : btFoundMACs) {
+        if (d.name == new_device_name.c_str()) {
+            Serial.println("[BT] MAC known from scan — connecting by address");
+            a2dp.set_auto_reconnect(const_cast<uint8_t*>(d.mac));
+            break;
+        }
+    }
+
+    // reconnect() uses last_connection: set above via set_auto_reconnect(mac),
+    // or the MAC already stored from the most recent successful connection.
+    if (!a2dp.reconnect()) {
+        // No MAC available (cold boot, first-ever device) — fall back to name scan.
+        // This path is only taken when has_last_connection() returns false.
+        Serial.println("[BT] No MAC available, falling back to name-based start()");
+        a2dp.start(last_device_name.c_str());
+    }
+    Serial.println("[BT] Connecting...");
 }
 
 void startBTScan() {
@@ -567,7 +630,9 @@ void startBTScan() {
         delay(500);
     }
 
-    btFoundDevices.clear();
+    btFoundDevices.clear();   // clear display list for each scan
+    // btFoundMACs is a persistent session cache — NOT cleared here so boot
+    // device MACs (captured by btBootScanCallback) survive across scans
     btScanning = true;
 
     // Set callbacks: collect all found devices, never auto-connect
@@ -624,6 +689,28 @@ void initAudio()
     String savedDevice = rougePrefs.loadBTDevice();
     last_device_name = savedDevice.isEmpty() ? String(headphoneName) : savedDevice;
     Serial.printf("[BT] Connecting to: %s\n", last_device_name.c_str());
+    // Pre-populate MAC cache from NVS so reconnect() works immediately for any
+    // saved device even before the boot scan finds it in the air.
+    {
+        auto names = rougePrefs.loadBTDeviceList();
+        auto hexes = rougePrefs.loadBTMACList();
+        for (int i = 0; i < (int)names.size() && i < (int)hexes.size(); i++) {
+            if (hexes[i].size() == 12) {
+                BTDeviceMAC entry;
+                entry.name = names[i];
+                for (int j = 0; j < 6; j++) {
+                    char b[3] = { hexes[i][j*2], hexes[i][j*2+1], '\0' };
+                    entry.mac[j] = (uint8_t)strtol(b, nullptr, 16);
+                }
+                btFoundMACs.push_back(entry);
+                Serial.printf("[BT] Loaded MAC for %s from NVS\n", names[i].c_str());
+            }
+        }
+    }
+
+    // Boot scan callback: caches every found device's MAC so reconnect() works
+    // by address for any device seen this session — including the boot target.
+    a2dp.set_ssid_callback(btBootScanCallback);
     a2dp.start(last_device_name.c_str());
     Serial.println("✅ A2DP Started!");
     bluetoothConnected = false;

@@ -249,19 +249,58 @@ int RougePreferences::loadShuffle() {
 // BT saved device list (up to 5, most recent first)
 static const int BT_DEV_MAX = 5;
 static const char* BT_DEV_KEYS[BT_DEV_MAX] = { "btDev0", "btDev1", "btDev2", "btDev3", "btDev4" };
+static const char* BT_MAC_KEYS[BT_DEV_MAX] = { "btMac0", "btMac1", "btMac2", "btMac3", "btMac4" };
 
-void RougePreferences::addBTDevice(const std::string& name) {
-    if (!isOpen || name.empty()) return;
-    std::vector<std::string> list = loadBTDeviceList();
-    for (auto it = list.begin(); it != list.end(); ++it) {
-        if (*it == name) { list.erase(it); break; }
+// Convert 6-byte MAC to 12-char uppercase hex string
+static std::string macToHex(const uint8_t* mac) {
+    char buf[13];
+    snprintf(buf, sizeof(buf), "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return std::string(buf);
+}
+
+// Convert 12-char hex string to 6-byte MAC; returns true on success
+static bool hexToMAC(const std::string& hex, uint8_t* mac) {
+    if (hex.size() != 12) return false;
+    for (int i = 0; i < 6; i++) {
+        char b[3] = { hex[i*2], hex[i*2+1], '\0' };
+        mac[i] = (uint8_t)strtol(b, nullptr, 16);
     }
-    list.insert(list.begin(), name);
-    if ((int)list.size() > BT_DEV_MAX) list.resize(BT_DEV_MAX);
-    int32_t cnt = (int32_t)list.size();
+    return true;
+}
+
+void RougePreferences::addBTDevice(const std::string& name, const uint8_t* mac) {
+    if (!isOpen || name.empty()) return;
+
+    std::vector<std::string> names = loadBTDeviceList();
+    std::vector<std::string> macs  = loadBTMACList();
+    // Pad MAC list to match name list length
+    while ((int)macs.size() < (int)names.size()) macs.push_back("");
+
+    // Remove existing entry for this name, preserving its old MAC if no new one given
+    std::string existingMac;
+    for (int i = 0; i < (int)names.size(); i++) {
+        if (names[i] == name) {
+            existingMac = (i < (int)macs.size()) ? macs[i] : "";
+            names.erase(names.begin() + i);
+            macs.erase(macs.begin() + i);
+            break;
+        }
+    }
+
+    // Prepend new entry
+    names.insert(names.begin(), name);
+    std::string newMac = mac ? macToHex(mac) : existingMac;
+    macs.insert(macs.begin(), newMac);
+
+    if ((int)names.size() > BT_DEV_MAX) { names.resize(BT_DEV_MAX); macs.resize(BT_DEV_MAX); }
+
+    int32_t cnt = (int32_t)names.size();
     nvs_set_i32(nvsHandle, "btDevCnt", cnt);
-    for (int i = 0; i < cnt; i++)
-        nvs_set_str(nvsHandle, BT_DEV_KEYS[i], list[i].c_str());
+    for (int i = 0; i < cnt; i++) {
+        nvs_set_str(nvsHandle, BT_DEV_KEYS[i], names[i].c_str());
+        nvs_set_str(nvsHandle, BT_MAC_KEYS[i], macs[i].c_str());
+    }
     nvs_commit(nvsHandle);
 }
 
@@ -276,6 +315,22 @@ std::vector<std::string> RougePreferences::loadBTDeviceList() {
         size_t len = sizeof(buf);
         if (nvs_get_str(nvsHandle, BT_DEV_KEYS[i], buf, &len) == ESP_OK && buf[0])
             list.push_back(std::string(buf));
+    }
+    return list;
+}
+
+std::vector<std::string> RougePreferences::loadBTMACList() {
+    std::vector<std::string> list;
+    if (!isOpen) return list;
+    int32_t cnt = 0;
+    nvs_get_i32(nvsHandle, "btDevCnt", &cnt);
+    if (cnt < 0 || cnt > BT_DEV_MAX) cnt = 0;
+    char buf[16] = {};
+    for (int i = 0; i < cnt; i++) {
+        size_t len = sizeof(buf);
+        buf[0] = '\0';
+        nvs_get_str(nvsHandle, BT_MAC_KEYS[i], buf, &len);
+        list.push_back(std::string(buf));  // "" if not found / empty
     }
     return list;
 }
