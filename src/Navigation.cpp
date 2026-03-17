@@ -18,6 +18,7 @@ static void savePlayingContext() {
 
 void handleButtonPress(int buttonIndex)
 {
+  if (buttonsLocked) return;
   switch (buttonIndex)
   {
   case 0:
@@ -329,6 +330,7 @@ void handleRight()
 
 void handleTopLongPress()
 {
+  if (buttonsLocked) return;
   // Long press Top → jump to Home (main menu), clearing nav stack
   Serial.println("🏠 Top LONG PRESS → Home");
   hapticBack();
@@ -343,6 +345,7 @@ void handleTopLongPress()
 
 void handleBottomLongPress()
 {
+  if (buttonsLocked) return;
   // Long press Bottom → jump to Now Playing
   Serial.println("🎵 Bottom LONG PRESS → Now Playing");
   hapticSelection();

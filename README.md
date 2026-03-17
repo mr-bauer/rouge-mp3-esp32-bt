@@ -15,6 +15,7 @@ A hand-built portable audio player based on the Adafruit Feather ESP32 V2. Music
 - Remembers last-played position across power cycles; Play works immediately on reboot
 - Haptic feedback (DRV2605L) with distinct effects for scroll, select, back, and error
 - Battery monitoring with percentage and charging indicator in the status bar
+- Deep sleep after 15 min of inactivity (not playing) — CENTER button wakes the device; <1 mA in sleep
 - Flicker-free display via LovyanGFX off-screen sprite rendering and DMA transfer
 
 See [Features.md](Features.md) for a complete feature list and the full roadmap.
@@ -45,6 +46,8 @@ See [docs/HARDWARE.md](docs/HARDWARE.md) for the full GPIO map and wiring guide.
 **Firmware:**
 - [PlatformIO](https://platformio.org/) (CLI or VSCode extension)
 - Git
+
+> **Custom framework required**: This project uses a custom-compiled arduino-esp32 framework to free IRAM for deep sleep. The `platform_packages` entry in `platformio.ini` points to it via a local symlink. See [docs/CUSTOM_FRAMEWORK.md](docs/CUSTOM_FRAMEWORK.md) for details and rebuild instructions.
 
 **SD card indexer (desktop):**
 - Python 3.8+
@@ -253,3 +256,4 @@ Rouge uses a two-tier architecture:
 - [Features.md](Features.md) — Complete feature list and enhancement roadmap
 - [docs/HARDWARE.md](docs/HARDWARE.md) — GPIO map, component list, and wiring guide
 - [docs/INDEXER.md](docs/INDEXER.md) — Desktop indexer tool reference
+- [docs/CUSTOM_FRAMEWORK.md](docs/CUSTOM_FRAMEWORK.md) — Custom arduino-esp32 build: why it exists, what changed, and how to rebuild

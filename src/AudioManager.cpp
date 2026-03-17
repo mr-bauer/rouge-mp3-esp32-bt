@@ -721,6 +721,13 @@ void initAudio()
 
 void audioLoop()
 {
+    // Sleep-stop: display task sets this flag after 1 hour of no input while playing
+    if (playStopRequested) {
+        playStopRequested = false;
+        stopPlayback();
+        return;
+    }
+
     // Feed buffer when playing
     if (player_state == STATE_PLAYING && bluetoothConnected) {
         if (m4aActive) {

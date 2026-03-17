@@ -57,8 +57,12 @@ bool brightnessControlActive = false;
 unsigned long lastBrightnessChange = 0;
 
 // Sleep / dim state
-volatile unsigned long lastActivityTime = 0;
-volatile bool          isScreenDimmed   = false;
+volatile unsigned long lastActivityTime  = 0;
+volatile bool          isScreenDimmed    = false;
+volatile bool          playStopRequested = false;
+volatile bool          screenIsFullyOff      = false;
+bool                   buttonsLocked         = false;
+bool                   btDisconnectedBySleep = false;
 
 // Progress tracking
 volatile unsigned long playbackStartMillis = 0;

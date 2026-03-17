@@ -3,6 +3,7 @@
 #include "Haptics.h"
 #include "EncoderModule.h"
 #include "State.h"
+#include "Display.h"
 
 // Button pin definitions
 #define BTN_CENTER 4
@@ -40,10 +41,10 @@ void handleInterrupt(int index) {
 }
 
 void onCenterButton() { handleInterrupt(BTN_IDX_CENTER); }
-void onLeftButton() { handleInterrupt(BTN_IDX_LEFT); }
-void onTopButton() { handleInterrupt(BTN_IDX_TOP); }
+void onLeftButton()   { handleInterrupt(BTN_IDX_LEFT);   }
+void onTopButton()    { handleInterrupt(BTN_IDX_TOP);    }
 void onBottomButton() { handleInterrupt(BTN_IDX_BOTTOM); }
-void onRightButton() { handleInterrupt(BTN_IDX_RIGHT); }
+void onRightButton()  { handleInterrupt(BTN_IDX_RIGHT);  }
 
 // ============================================================================
 // INITIALIZATION
@@ -123,7 +124,7 @@ bool processADCButton(int btnIndex, int gpio, const char* name,
 
 void pollButtons() {
   bool scrolling = isEncoderScrolling();
-  
+
   // CENTER button - NO FILTERING, immediate response (has internal pull-up)
   if (btnPressed[BTN_IDX_CENTER]) {
     btnPressed[BTN_IDX_CENTER] = false;
@@ -138,8 +139,34 @@ void pollButtons() {
     }
   }
   
-  // ADC buttons with filtering
-  processADCButton(BTN_IDX_LEFT, BTN_LEFT, "Left", handleButtonPress, 1);
+  // LEFT: short press = Previous track, long press (700ms) = toggle button lock
+  if (btnPressed[BTN_IDX_LEFT]) {
+    unsigned long dur = millis() - pressStartTime[BTN_IDX_LEFT];
+    bool pinLow = (digitalRead(BTN_LEFT) == LOW);
+    if (pinLow && dur >= LONG_PRESS_MS) {
+      btnPressed[BTN_IDX_LEFT] = false;
+      if (!scrolling) {
+        lastActivityTime   = millis();
+        displayNeedsUpdate = true;
+        buttonsLocked = !buttonsLocked;
+        Serial.printf("🔒 Button lock %s\n", buttonsLocked ? "ON" : "OFF");
+        hapticSelection();
+      }
+    } else if (!pinLow && dur >= BUTTON_MIN_DURATION_ADC) {
+      btnPressed[BTN_IDX_LEFT] = false;
+      if (!scrolling) {
+        lastActivityTime = millis();
+        hapticButtonPress();
+        handleButtonPress(1);
+      }
+    } else if (!pinLow) {
+      btnPressed[BTN_IDX_LEFT] = false;
+      Serial.println("⚠️ Left button glitch filtered");
+    }
+    // else: still held, duration < LONG_PRESS_MS → wait
+  }
+
+  // RIGHT: short press = Next track
   processADCButton(BTN_IDX_RIGHT, BTN_RIGHT, "Right", handleButtonPress, 4);
 
   // TOP: short press = Back/Menu, long press (700ms) = Home

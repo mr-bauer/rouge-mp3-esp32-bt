@@ -15,7 +15,9 @@
 | Play / Pause / Resume / Stop | Full playback state machine with clean buffer resets |
 | Volume control | Encoder-activated from Now Playing; applies to both MP3 and M4A; saved to NVS with 3s debounce |
 | Auto-fade between tracks | Enabled via arduino-audio-tools `setAutoFade(true)` |
-| Bluetooth reconnect / disconnect | Manual reconnect and disconnect from the Bluetooth menu |
+| Bluetooth reconnect / disconnect | MAC-based reconnect using stored device addresses; disconnect and reconnect without restarting; uses `reconnect()` directly (no A2DP stack reinit) |
+| Bluetooth device scanning | Scans for nearby A2DP sink devices and presents a selectable list on screen; scan state and results update in real time |
+| Saved BT device list | Up to 5 most-recently-connected devices stored in NVS with MAC addresses; player pre-populates MAC cache from NVS on boot for reliable reconnect; shown in Bluetooth menu with connect/disconnect controls |
 
 ### Library & Browsing
 
@@ -67,15 +69,13 @@
 | Watchdog timer | 30-second hardware watchdog prevents lockup |
 | FreeRTOS display task | Display runs on Core 0 at 50ms intervals; audio processing runs on Core 1 |
 | Display mutex | `displayMutex` protects the display bus between the spinner task and the main display task |
-| Auto-dim + screen-off | Dims to ~6% brightness after 30s of inactivity; turns screen fully off after 5 min if stopped/paused; smooth fade in/out; wakes on button press |
+| Auto-dim + screen-off | Dims to ~6% brightness after 30s of inactivity; turns screen fully off after 5 min of no input (all player states); smooth fade in/out; wakes on button press |
+| 1-hour auto-stop | After 1 hour of no input while playing, playback stops automatically |
+| BT sleep disconnect | After 15 min screen-off, A2DP connection is dropped (~10–15 mA savings); auto-reconnects on wake |
+| Deep sleep | After 15 min screen-off with no active playback, enters ESP32 deep sleep (<1 mA); backlight held LOW via GPIO hold; CENTER button (GPIO4, EXT0 wakeup) wakes the device; full boot on wake with GPIO holds released before display init |
+| Button lock | Long-press LEFT toggles button lock; all button/encoder input suppressed when locked; padlock icon shown in header; locked state visible even when screen is dimmed |
 | Resume on boot | Restores last-played artist/album/song position from NVS on startup so Play works immediately; toggleable in Settings |
 | Shuffle mode | Three modes: Off / Song-level (random within current album) / Library-wide (random artist→album→song); toggled from Settings or Center button on Now Playing; indicator shown on Now Playing screen; saved to NVS |
-
----
-
-## Known Bugs
-
-- **Bluetooth reconnect after disconnect fails** — after manually disconnecting a device from the Bluetooth menu and then attempting to reconnect to it (via the saved device list), the connection attempt starts (`CONNECTING...`) but never completes (`CONNECTED` never fires). Root cause is not yet confirmed; suspected issue is that `a2dp.start(name)` called on an already-running-but-idle A2DP stack after a clean disconnect does not reliably re-initiate the connection on the ESP32-A2DP library. Workaround: power-cycle the player to reconnect. Previous attempted fix using `a2dp.end()` + `a2dp.start()` caused a different regression (stack never came back up after `end()`). Needs further investigation with serial logging to confirm exact failure point.
 
 ---
 
@@ -83,7 +83,6 @@
 
 ### Stubbed / Placeholder Features (Already in UI, Not Yet Wired)
 
-- [x] **Shuffle mode** — Off / Song-level / Library-wide; cycles via Settings "Shuffle:" item or Center button on Now Playing; indicator shown on Now Playing; persisted to NVS
 - [ ] **Repeat mode** — toggle exists in Settings menu (`Repeat: Off`) but has no effect; needs single-track and full-library repeat modes, wired into `autoNext()`
 - [ ] **Album browser** — "Albums" in Music menu navigates nowhere; intended to browse all albums across artists without picking an artist first
 - [ ] **All Songs browser** — "All Songs" in Music menu navigates nowhere; intended as a flat list of every song in the library
@@ -94,11 +93,6 @@
 
 - [ ] **Additional audio formats** — MP3 and M4A/AAC are supported; candidates for future formats are FLAC, OGG Vorbis, and WAV — each requires a matching arduino-audio-tools codec and potentially more PSRAM buffer headroom
 - [ ] **Sleep timer** — auto-pause/stop playback after N minutes; configurable from Settings
-
-### Bluetooth
-
-- [ ] **Bluetooth device discovery** — scan for nearby A2DP sink devices and present a selectable list on screen; store the chosen device name in NVS (`rougePrefs`) so the player auto-connects to it on next boot without hardcoding `headphoneName`
-- [ ] **Make Bluetooth device name configurable** — interim step: move `headphoneName` out of `AudioManager.cpp` into NVS so it survives re-flash without code changes (blocked by device discovery above for the full solution)
 
 ### Library / Browsing
 
@@ -117,12 +111,7 @@
 
 ### Settings / Persistence
 
-- [ ] **Display off while playing** — the display already dims after 30s of inactivity, but does not fully turn off if music is still playing (current logic only turns off after 5 min when stopped/paused). Add a second timeout (e.g. 2–5 min of no input while playing) to cut the backlight to 0, saving the ~40–50mA backlight draw during long listening sessions without touching audio. Any button press wakes the screen. Configurable via a "Screen Off Timer" setting or reuse the existing dim/sleep timeout chain.
-- [ ] **True sleep mode (deep or light)** — blocked by IRAM overflow: both `esp_deep_sleep_start()` and `esp_light_sleep_start()` require ~3,640B of IRAM for their power-down sequence, but the firmware currently has only ~14 bytes of IRAM headroom (BT A2DP + coexist fills the 128KB IRAM segment). Screen-off mode is the current workaround (~40–50mA savings from backlight). To unlock true sleep: rebuild ESP-IDF SDK with `CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y` and `CONFIG_ESP32_WIFI_ENABLED=0` at the ESP-IDF level (note: adding these as `-D` PlatformIO build flags has no effect on pre-compiled Arduino framework libraries); or switch to ESP-IDF framework directly in PlatformIO.
-- [ ] **CPU frequency scaling** — call `setCpuFrequencyMhz(80)` when player is stopped/paused and screen is dimmed; restore to 240MHz on activity. Saves ~60mA (240→80MHz), zero IRAM cost. Integrate into `manageSleep()` in `Display.cpp` alongside the existing brightness logic.
-- [ ] **Disable WiFi** — call `WiFi.mode(WIFI_OFF)` in `setup()` since WiFi is never used. Saves ~333B IRAM (frees `libesp_wifi.a` + `libesp_phy.a`); `libcoexist.a` stays (required by BT stack). Negligible runtime power savings but cleans up dead code.
 - [ ] **Volume in Settings** — volume is encoder-activated from Now Playing, but not visible or adjustable from the Settings menu directly
-- [x] **Restore last-played position** — saves artist/album/song to NVS on every track change; restored on boot; browse state rebuilt so Play button works immediately; gated by "Resume on Boot" setting
 
 ### Infrastructure / Code Health
 
