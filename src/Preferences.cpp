@@ -246,6 +246,20 @@ int RougePreferences::loadShuffle() {
     return (val >= 0 && val <= 2) ? (int)val : 0;
 }
 
+// Haptics enabled
+void RougePreferences::saveHaptics(bool enabled) {
+    if (!isOpen) return;
+    nvs_set_i32(nvsHandle, "haptics", enabled ? 1 : 0);
+    nvs_commit(nvsHandle);
+}
+
+bool RougePreferences::loadHaptics() {
+    if (!isOpen) return true;
+    int32_t val = 1;
+    nvs_get_i32(nvsHandle, "haptics", &val);
+    return val != 0;
+}
+
 // BT saved device list (up to 5, most recent first)
 static const int BT_DEV_MAX = 5;
 static const char* BT_DEV_KEYS[BT_DEV_MAX] = { "btDev0", "btDev1", "btDev2", "btDev3", "btDev4" };

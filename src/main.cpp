@@ -48,6 +48,7 @@ void setup()
     themeIndex = rougePrefs.loadTheme();
     Serial.printf("💾 Loaded theme: %d\n", themeIndex);
     shuffleMode = rougePrefs.loadShuffle();
+    hapticsEnabled = rougePrefs.loadHaptics();
     Serial.printf("💾 Loaded shuffle: %d\n", shuffleMode);
     btSavedDevices = rougePrefs.loadBTDeviceList();
     Serial.printf("💾 Loaded %d saved BT device(s)\n", (int)btSavedDevices.size());
@@ -169,12 +170,14 @@ void loop()
             Serial.println("[SLEEP] Screen off — entering sleep mode");
         }
 
-        // Tiered BT disconnect: after 15 min of screen-off, drop A2DP connection
+        // Tiered BT disconnect: after 15 min of screen-off and not playing, drop A2DP connection
         if (!btDisconnectedBySleep && bluetoothConnected &&
+            player_state != STATE_PLAYING &&
             millis() - sleepStartMs >= BT_SLEEP_TIMEOUT_MS) {
             disconnectBluetooth();
             btDisconnectedBySleep = true;
             Serial.println("[SLEEP] BT disconnected by 15-min sleep timer");
+            return; // don't evaluate deep sleep on the same iteration as BT disconnect
         }
 
         // Deep sleep: 15 min screen-off + not playing → full power-off until CENTER press

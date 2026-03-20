@@ -154,6 +154,9 @@ void buildSettingsMenu() {
   currentMenuItems.push_back(MenuItem(
     shuffleMode == 0 ? "Shuffle: Off" : (shuffleMode == 1 ? "Shuffle: Song" : "Shuffle: Library"),
     MENU_SETTINGS));
+  currentMenuItems.push_back(MenuItem(
+    hapticsEnabled ? "Haptics: On" : "Haptics: Off",
+    MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Repeat: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("About", MENU_SETTINGS));
   menuIndex = 0;

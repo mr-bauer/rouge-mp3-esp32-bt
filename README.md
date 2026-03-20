@@ -133,6 +133,8 @@ const char *headphoneName = "Your Device Name Here";
 
 The name must match exactly what the device advertises over Bluetooth.
 
+> **Don't know the device name?** You can skip this step and leave the default. On the device, go to **Bluetooth → Scan** to discover nearby A2DP sink devices — select one from the list to connect and it will be saved for future reconnects.
+
 ### 3. Build and flash
 
 #### Build variants

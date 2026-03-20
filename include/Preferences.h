@@ -58,6 +58,10 @@ public:
     void saveShuffle(int mode);
     int  loadShuffle();
 
+    // Haptics enabled
+    void saveHaptics(bool enabled);
+    bool loadHaptics();
+
 private:
     nvs_handle_t nvsHandle;
     bool isOpen;

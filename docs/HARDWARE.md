@@ -116,4 +116,4 @@ GPIO 7 controls the display backlight brightness. LovyanGFX manages this automat
 - **USB-C:** Powers the board and charges the LiPo battery simultaneously via the onboard MCP73831 charger.
 - **LiPo battery:** Connect to the JST-PH 2-pin connector. Provides ~3.2–4.2V to the regulator; the onboard 3.3V LDO powers the ESP32 and peripherals.
 - **Current draw:** With display at full brightness and Bluetooth active, expect 150–250 mA from the battery. A 500 mAh cell gives roughly 2–3 hours of playback.
-- **Deep sleep:** Not yet implemented (see [Features.md](../Features.md)); the board will draw ~10–15 mA idle with the display dimmed.
+- **Deep sleep:** After 15 min of screen-off with no active playback, the firmware enters ESP32 deep sleep (<1 mA). The CENTER button (GPIO 4, EXT0 wakeup) wakes the device. GPIO 7 (backlight) is held LOW during sleep; a hardware pull-down on GPIO 7 is recommended on custom PCBs to ensure the backlight stays off if the GPIO floats.

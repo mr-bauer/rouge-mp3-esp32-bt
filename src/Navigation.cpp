@@ -148,6 +148,17 @@ void handleCenter()
           return;
         }
 
+        if (item.label.find("Haptics:") == 0) {
+          hapticsEnabled = !hapticsEnabled;
+          Serial.printf("📳 Haptics: %s\n", hapticsEnabled ? "On" : "Off");
+          rougePrefs.saveHaptics(hapticsEnabled);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          if (hapticsEnabled) hapticSelection();  // confirm only if turning on
+          return;
+        }
+
         return;
       }
       

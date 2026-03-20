@@ -530,7 +530,7 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
   sprite.setTextSize(1);
   sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_BG);
   sprite.setTextColor(COLOR_HEADER);
-  drawCenteredText(sprite, headerText, 8, 1);
+  drawCenteredText(sprite, headerText, 11, 1);
 
   // Playback indicator
   if (player_state == STATE_PLAYING || player_state == STATE_PAUSED) {
@@ -544,9 +544,9 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
   int battY = (UI_HEADER_HEIGHT - 16) / 2;
   drawBatteryIcon(battX, battY, batteryPercent, batteryCharging);
 
-  // Padlock icon when buttons are locked — drawn top-left of header
+  // Padlock icon when buttons are locked — drawn right of play/pause icon
   if (buttonsLocked) {
-    int px = 4;
+    int px = 28;
     int py = (UI_HEADER_HEIGHT - 16) / 2;
     // Shackle arch (hollow rounded rect with bottom erased to form a U-arch)
     sprite.drawRoundRect(px + 3, py + 1, 8, 9, 4, COLOR_TEXT);
