@@ -141,6 +141,15 @@ void updateEncoder()
     if (now - lastEncoderUpdate < ENCODER_UPDATE_INTERVAL) {
       return;
     }
+
+    // Button lock — suppress all encoder actions but still wake screen
+    if (buttonsLocked) {
+      lastActivityTime = now;
+      displayNeedsUpdate = true;
+      lastPos = newPos;
+      lastValidPos = newPos;
+      return;
+    }
     unsigned long tickInterval = now - lastEncoderMovement;  // time since last accepted tick
     lastEncoderUpdate = now;
     lastEncoderMovement = now;

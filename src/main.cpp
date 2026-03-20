@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <SdFat.h>
 #include <esp_task_wdt.h>
+#include "esp_sleep.h"
+#include "driver/rtc_io.h"
+#include "driver/gpio.h"
 
 // Include all project modules
 #include "Display.h"
@@ -23,6 +26,10 @@ void setup()
     Serial.begin(115200);
     delay(300);
     Serial.println("\n\n🎧 Rouge MP3 Player starting...");
+
+    // Release GPIO holds that may persist from deep sleep entry
+    gpio_hold_dis(GPIO_NUM_7);   // backlight — held LOW during sleep, release before display init
+    rtc_gpio_deinit(GPIO_NUM_4); // CENTER button — return from RTC GPIO mode to normal digital input
     
     Serial.println("✅ Watchdog enabled");
 
@@ -41,6 +48,7 @@ void setup()
     themeIndex = rougePrefs.loadTheme();
     Serial.printf("💾 Loaded theme: %d\n", themeIndex);
     shuffleMode = rougePrefs.loadShuffle();
+    hapticsEnabled = rougePrefs.loadHaptics();
     Serial.printf("💾 Loaded shuffle: %d\n", shuffleMode);
     btSavedDevices = rougePrefs.loadBTDeviceList();
     Serial.printf("💾 Loaded %d saved BT device(s)\n", (int)btSavedDevices.size());
@@ -149,21 +157,77 @@ void setup()
     lastActivityTime = millis();
 }
 
+static unsigned long sleepStartMs = 0;  // millis() when current sleep session began
+
 void loop()
 {
-    // Feed the watchdog
     esp_task_wdt_reset();
 
-    // CORE 1: Audio processing - highest priority
+    // ── SCREEN-OFF MODE: skip non-essential work ───────────────────────────
+    if (screenIsFullyOff) {
+        if (sleepStartMs == 0) {
+            sleepStartMs = millis();
+            Serial.println("[SLEEP] Screen off — entering sleep mode");
+        }
+
+        // Tiered BT disconnect: after 15 min of screen-off and not playing, drop A2DP connection
+        if (!btDisconnectedBySleep && bluetoothConnected &&
+            player_state != STATE_PLAYING &&
+            millis() - sleepStartMs >= BT_SLEEP_TIMEOUT_MS) {
+            disconnectBluetooth();
+            btDisconnectedBySleep = true;
+            Serial.println("[SLEEP] BT disconnected by 15-min sleep timer");
+            return; // don't evaluate deep sleep on the same iteration as BT disconnect
+        }
+
+        // Deep sleep: 15 min screen-off + not playing → full power-off until CENTER press
+        if (millis() - sleepStartMs >= BT_SLEEP_TIMEOUT_MS && player_state != STATE_PLAYING) {
+            Serial.println("[SLEEP] Entering deep sleep — press CENTER to wake");
+            Serial.flush();
+            // Block the display task (Core 0) so it can't render during sleep entry
+            xSemaphoreTake(displayMutex, portMAX_DELAY);
+            // Force backlight LOW and hold — LEDC PWM dies in deep sleep, pin would float HIGH
+            gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
+            gpio_set_level(GPIO_NUM_7, 0);
+            gpio_hold_en(GPIO_NUM_7);
+            gpio_deep_sleep_hold_en();
+            // Wake on CENTER button (GPIO4, active-low)
+            rtc_gpio_pullup_en(GPIO_NUM_4);
+            rtc_gpio_pulldown_dis(GPIO_NUM_4);
+            esp_sleep_enable_ext0_wakeup(GPIO_NUM_4, 0);
+            esp_deep_sleep_start();
+        }
+
+        // audioLoop needed for playStopRequested handling and buffer feed when playing
+        audioLoop();
+        pollButtons();
+
+        static unsigned long lastSleepBattMs = 0;
+        if (millis() - lastSleepBattMs >= 30000) {
+            updateBattery();
+            lastSleepBattMs = millis();
+        }
+
+        return;
+    }
+
+    // ── NORMAL MODE ─────────────────────────────────────────────────────────
+
+    // Waking from sleep: reset session timer; auto-reconnect BT if needed
+    if (sleepStartMs != 0) {
+        sleepStartMs = 0;
+        if (btDisconnectedBySleep) {
+            btDisconnectedBySleep = false;
+            if (!bluetoothConnected) {
+                Serial.println("[SLEEP] Waking — auto-reconnecting BT");
+                reconnectBluetooth();
+            }
+        }
+    }
+
     audioLoop();
-
-    // Battery monitoring
     updateBattery();
-
-    // Encoder updates (lightweight)
     updateEncoder();
-
-    // Button processing
     pollButtons();
 
 

@@ -18,6 +18,7 @@ static void savePlayingContext() {
 
 void handleButtonPress(int buttonIndex)
 {
+  if (buttonsLocked) return;
   switch (buttonIndex)
   {
   case 0:
@@ -144,6 +145,17 @@ void handleCenter()
           forceDisplayRedraw = true;
           displayNeedsUpdate = true;
           hapticSelection();
+          return;
+        }
+
+        if (item.label.find("Haptics:") == 0) {
+          hapticsEnabled = !hapticsEnabled;
+          Serial.printf("📳 Haptics: %s\n", hapticsEnabled ? "On" : "Off");
+          rougePrefs.saveHaptics(hapticsEnabled);
+          buildSettingsMenu();
+          forceDisplayRedraw = true;
+          displayNeedsUpdate = true;
+          if (hapticsEnabled) hapticSelection();  // confirm only if turning on
           return;
         }
 
@@ -329,6 +341,7 @@ void handleRight()
 
 void handleTopLongPress()
 {
+  if (buttonsLocked) return;
   // Long press Top → jump to Home (main menu), clearing nav stack
   Serial.println("🏠 Top LONG PRESS → Home");
   hapticBack();
@@ -343,6 +356,7 @@ void handleTopLongPress()
 
 void handleBottomLongPress()
 {
+  if (buttonsLocked) return;
   // Long press Bottom → jump to Now Playing
   Serial.println("🎵 Bottom LONG PRESS → Now Playing");
   hapticSelection();

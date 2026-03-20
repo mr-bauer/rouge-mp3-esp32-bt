@@ -57,8 +57,12 @@ bool brightnessControlActive = false;
 unsigned long lastBrightnessChange = 0;
 
 // Sleep / dim state
-volatile unsigned long lastActivityTime = 0;
-volatile bool          isScreenDimmed   = false;
+volatile unsigned long lastActivityTime  = 0;
+volatile bool          isScreenDimmed    = false;
+volatile bool          playStopRequested = false;
+volatile bool          screenIsFullyOff      = false;
+bool                   buttonsLocked         = false;
+bool                   btDisconnectedBySleep = false;
 
 // Progress tracking
 volatile unsigned long playbackStartMillis = 0;
@@ -149,6 +153,9 @@ void buildSettingsMenu() {
     MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem(
     shuffleMode == 0 ? "Shuffle: Off" : (shuffleMode == 1 ? "Shuffle: Song" : "Shuffle: Library"),
+    MENU_SETTINGS));
+  currentMenuItems.push_back(MenuItem(
+    hapticsEnabled ? "Haptics: On" : "Haptics: Off",
     MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("Repeat: Off", MENU_SETTINGS));
   currentMenuItems.push_back(MenuItem("About", MENU_SETTINGS));

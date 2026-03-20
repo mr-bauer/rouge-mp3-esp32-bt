@@ -90,24 +90,27 @@ void applyTheme(int themeIdx) {
 static void manageSleep() {
   unsigned long idle = millis() - lastActivityTime;
 
-  // Compute brightness target based on inactivity level:
+  // Compute brightness target:
   //   active       → user's full brightness
   //   dim timeout  → DIM_BRIGHTNESS (faint glow)
-  //   sleep timeout (not playing) → 0 (screen off, wake on button press)
+  //   sleep timeout → 0 (screen off); applies to all player states
   int newTarget;
   if (idle < DIM_TIMEOUT_MS) {
     isScreenDimmed = false;
     newTarget = screenBrightness;
-  } else if (idle < SLEEP_TIMEOUT_MS ||
-             (player_state == STATE_PLAYING)) {
+  } else if (idle < SLEEP_TIMEOUT_MS) {
     isScreenDimmed = true;
     newTarget = DIM_BRIGHTNESS;
   } else {
-    // Stopped or paused + sleep timeout reached → screen off
     isScreenDimmed = true;
     newTarget = 0;
   }
   targetBrightness = newTarget;
+
+  // Stop playback after 1 hour of no input while playing.
+  if (player_state == STATE_PLAYING && idle >= PLAY_STOP_TIMEOUT_MS) {
+    playStopRequested = true;
+  }
 }
 
 static void stepBrightness() {
@@ -126,6 +129,7 @@ static void stepBrightness() {
     activeBrightness = min(activeBrightness + DIM_STEP_UP,   targetBrightness);
 
   display.setBrightness(activeBrightness);
+  screenIsFullyOff = (activeBrightness == 0);
 }
 
 // ============================================================================
@@ -526,7 +530,7 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
   sprite.setTextSize(1);
   sprite.fillRect(0, 0, SCREEN_WIDTH, UI_HEADER_HEIGHT, COLOR_BG);
   sprite.setTextColor(COLOR_HEADER);
-  drawCenteredText(sprite, headerText, 8, 1);
+  drawCenteredText(sprite, headerText, 11, 1);
 
   // Playback indicator
   if (player_state == STATE_PLAYING || player_state == STATE_PAUSED) {
@@ -539,6 +543,17 @@ void updateHeader(bool fullRedraw, bool playbackStateChanged, bool periodicUpdat
   int battX = SCREEN_WIDTH - BATT_W - BATT_NW - 6;
   int battY = (UI_HEADER_HEIGHT - 16) / 2;
   drawBatteryIcon(battX, battY, batteryPercent, batteryCharging);
+
+  // Padlock icon when buttons are locked — drawn right of play/pause icon
+  if (buttonsLocked) {
+    int px = 28;
+    int py = (UI_HEADER_HEIGHT - 16) / 2;
+    // Shackle arch (hollow rounded rect with bottom erased to form a U-arch)
+    sprite.drawRoundRect(px + 3, py + 1, 8, 9, 4, COLOR_TEXT);
+    sprite.fillRect(px + 3, py + 7, 8, 3, COLOR_BG);
+    // Lock body
+    sprite.fillRoundRect(px, py + 7, 14, 9, 2, COLOR_TEXT);
+  }
 
   sprite.setTextColor(COLOR_TEXT);
 }
