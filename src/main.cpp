@@ -27,8 +27,8 @@ void setup()
     delay(300);
     Serial.println("\n\n🎧 Rouge MP3 Player starting...");
 
-    // Release GPIO holds that may persist from deep sleep entry
-    gpio_hold_dis(GPIO_NUM_7);   // backlight — held LOW during sleep, release before display init
+    // Release GPIO holds and RTC config that persist from deep sleep entry
+    gpio_hold_dis(GPIO_NUM_7);   // backlight hold — non-RTC GPIO hold survives deep sleep wake, must release before LEDC init
     rtc_gpio_deinit(GPIO_NUM_4); // CENTER button — return from RTC GPIO mode to normal digital input
     
     Serial.println("✅ Watchdog enabled");
@@ -186,9 +186,13 @@ void loop()
             Serial.flush();
             // Block the display task (Core 0) so it can't render during sleep entry
             xSemaphoreTake(displayMutex, portMAX_DELAY);
-            // Force backlight LOW and hold — LEDC PWM dies in deep sleep, pin would float HIGH
-            gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
-            gpio_set_level(GPIO_NUM_7, 0);
+            // Clear display to black to prevent burn-in if backlight stays on during sleep
+            sprite.fillScreen(0x0000);
+            sprite.pushSprite(0, 0);
+            // Force backlight LOW and hold — detach LEDC first so GPIO matrix fully owns the pin
+            ledcDetachPin(TFT_BL);
+            pinMode(TFT_BL, OUTPUT);
+            digitalWrite(TFT_BL, LOW);
             gpio_hold_en(GPIO_NUM_7);
             gpio_deep_sleep_hold_en();
             // Wake on CENTER button (GPIO4, active-low)

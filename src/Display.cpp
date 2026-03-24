@@ -203,6 +203,7 @@ void initDisplay()
 
   // LovyanGFX handles SPI init, reset sequence, and backlight PWM internally
   display.init();
+  display.setBrightness(screenBrightness); // set immediately — LEDC starts at 0, don't wait for display task
 #ifdef DISPLAY_240WIDE
   display.setRotation(2);  // Square 240x240 panel — adjust (1/2/3) if orientation is wrong
 #else
@@ -998,13 +999,13 @@ void updateNowPlayingScreen() {
   if (albumArtAvailable) {
     // Side-by-side layout: art on left, text on right
     // 320-wide: 130px art → 160px text area
-    // 240-wide:  90px art → 129px text area
+    // 240-wide: 120px art → 108px text area (art ends at y=175, clear of progress bar at y=196)
 #ifdef DISPLAY_240WIDE
-    const int ART_SIZE = 90;
-    const int ART_X    = 5;
-    const int ART_Y    = 55;
-    const int TEXT_X   = ART_X + ART_SIZE + 8;   // 103
-    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 8; // 129px
+    const int ART_SIZE = 125;
+    const int ART_X    = 1;
+    const int ART_Y    = 55;  // header ends at y=40; art ends at y=180, clear of progress bar at y=196
+    const int TEXT_X   = ART_X + ART_SIZE + 4;   // 130
+    const int TEXT_W   = SCREEN_WIDTH - TEXT_X - 2; // 108px
 #else
     const int ART_SIZE = 130;
     const int ART_X    = 10;
