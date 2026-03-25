@@ -16,21 +16,20 @@ static float lastVoltageReading = 0.0f;
 static float voltageChangeRate = 0.0f;
 static unsigned long lastVoltageTime = 0;
 
-// LiPo discharge curve lookup table - NEW
+// LiPo discharge curve lookup table
 struct BatteryPoint {
     float voltage;
     int percent;
-    float range;  // Voltage range to next point
 };
 
 static const BatteryPoint dischargeCurve[] = {
-    {4.2, 100, 0.1},   // 4.2V = 100%, next point at 0.1V
-    {4.1, 90,  0.2},   // 4.1V = 90%, next point at 0.2V
-    {3.9, 70,  0.2},   // 3.9V = 70%
-    {3.7, 40,  0.2},   // 3.7V = 40%
-    {3.5, 20,  0.2},   // 3.5V = 20%
-    {3.3, 5,   0.1},   // 3.3V = 5%
-    {3.2, 0,   0.0}    // 3.2V = 0% (minimum)
+    {4.2, 100},
+    {4.1, 90},
+    {3.9, 70},
+    {3.7, 40},
+    {3.5, 20},
+    {3.3, 5},
+    {3.2, 0}
 };
 
 static const int curveSize = sizeof(dischargeCurve) / sizeof(BatteryPoint);
@@ -66,18 +65,14 @@ int getBatteryPercent() {
     if (batteryVoltage >= BATTERY_VOLTAGE_FULL) return 100;
     if (batteryVoltage <= BATTERY_VOLTAGE_EMPTY) return 0;
     
-    // Find the appropriate segment in the discharge curve
+    // Find the appropriate segment and interpolate
     for (int i = 0; i < curveSize - 1; i++) {
         if (batteryVoltage >= dischargeCurve[i + 1].voltage) {
-            // Linear interpolation between two points
+            float voltageRange = dischargeCurve[i].voltage - dischargeCurve[i + 1].voltage;
+            if (voltageRange <= 0) return dischargeCurve[i + 1].percent;
             float voltageInSegment = batteryVoltage - dischargeCurve[i + 1].voltage;
             float percentRange = dischargeCurve[i].percent - dischargeCurve[i + 1].percent;
-            float voltageRange = dischargeCurve[i + 1].range;
-            
-            int percent = dischargeCurve[i + 1].percent + 
-                         (int)((voltageInSegment / voltageRange) * percentRange);
-            
-            return percent;
+            return dischargeCurve[i + 1].percent + (int)((voltageInSegment / voltageRange) * percentRange);
         }
     }
     
@@ -90,19 +85,20 @@ bool isBatteryCharging() {
     if (batteryVoltage > BATTERY_VOLTAGE_CHARGING) {
         return true;
     }
-    
+
     // Method 2: Voltage actively rising = charging
-    if (voltageChangeRate > BATTERY_CHARGE_RATE_THRESHOLD) {
-        return true;
-    }
-    
     // Method 3: Stable at high voltage = plugged in (full or maintaining)
-    if (batteryVoltage > BATTERY_VOLTAGE_HIGH && 
-        voltageChangeRate > BATTERY_STABLE_RATE_THRESHOLD) {
-        return true;
+    bool conditionsMet = (voltageChangeRate > BATTERY_CHARGE_RATE_THRESHOLD) ||
+                         (batteryVoltage > BATTERY_VOLTAGE_HIGH &&
+                          voltageChangeRate > BATTERY_STABLE_RATE_THRESHOLD);
+
+    // Hysteresis: once charging detected, require negative rate to clear it
+    // prevents flickering from ADC noise near the threshold
+    if (batteryCharging) {
+        return voltageChangeRate > -BATTERY_CHARGE_RATE_THRESHOLD;
     }
-    
-    return false;
+
+    return conditionsMet;
 }
 
 void updateBattery() {

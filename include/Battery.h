@@ -14,8 +14,8 @@
 #define BATTERY_VOLTAGE_HIGH 4.0f        // High voltage (stable = charging)
 
 // Charging detection
-#define BATTERY_CHARGE_RATE_THRESHOLD 0.005f   // Rising voltage threshold (V/s)
-#define BATTERY_STABLE_RATE_THRESHOLD -0.002f  // Not dropping = charging
+#define BATTERY_CHARGE_RATE_THRESHOLD 0.00005f  // Rising voltage threshold (V/s) — LiPo CC charge ~0.0001 V/s
+#define BATTERY_STABLE_RATE_THRESHOLD -0.00005f // Not dropping = charging/plugged in
 
 void initBattery();
 void updateBattery();

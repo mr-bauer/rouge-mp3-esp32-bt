@@ -45,11 +45,11 @@
 #ifdef DEBUG
 #define DIM_TIMEOUT_MS        5000UL     // 5 s  (debug)
 #define SLEEP_TIMEOUT_MS     10000UL     // 10 s (debug)
-#define BT_SLEEP_TIMEOUT_MS  15000UL     // 15 s → deep sleep (debug)
+#define DEEP_SLEEP_TIMEOUT_MS  15000UL   // 15 s → deep sleep (debug)
 #else
 #define DIM_TIMEOUT_MS      30000UL      // 30 s no input → dim display
-#define SLEEP_TIMEOUT_MS   300000UL      // 5 min no input → screen off (all player states)
-#define BT_SLEEP_TIMEOUT_MS  900000UL    // 15 min screen-off → deep sleep
+#define SLEEP_TIMEOUT_MS   120000UL      // 2 min no input → screen off (all player states)
+#define DEEP_SLEEP_TIMEOUT_MS  180000UL  // 3 min screen-off → deep sleep (total 5 min from last input)
 #endif
 #define PLAY_STOP_TIMEOUT_MS 3600000UL   // 1 hour no input while playing → stop playback
 #define DIM_BRIGHTNESS         15        // dimmed brightness level (0-255, ~6%)
@@ -178,7 +178,6 @@ extern volatile bool          isScreenDimmed;    // true while display is dimmed
 extern volatile bool          playStopRequested; // set by display task → audio loop stops playback
 extern volatile bool          screenIsFullyOff;  // true when activeBrightness reaches 0 (set by stepBrightness)
 extern bool                   buttonsLocked;     // true → all button/encoder input suppressed
-extern bool                   btDisconnectedBySleep; // true if BT was disconnected by the 15-min sleep timer
 
 // Progress tracking (set/reset by AudioManager)
 extern volatile unsigned long playbackStartMillis;  // millis() when current song started

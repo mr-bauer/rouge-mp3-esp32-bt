@@ -58,21 +58,21 @@
 | Adafruit Feather ESP32 V2 | ESP32-PICO-MINI-02, ECO3 silicon, 2MB PSRAM, USB-C |
 | Rotary encoder navigation | Direction filtering and anti-jump protection; drives all list scrolling |
 | 4 physical buttons | Menu/Back (tap), Play/Pause, Previous track, Next track; long-press Top (Back) → jump to Home menu; long-press Bottom (Play/Pause) → jump to Now Playing screen |
-| Haptic feedback | DRV2605L with 6 distinct effects: scroll tick, click, confirm double-click, menu transition, error buzz, back |
-| Battery monitoring | GPIO35 voltage divider; LiPo discharge curve with linear interpolation; charging detection; moving average smoothing |
+| Haptic feedback | DRV2605L with 6 distinct effects: scroll tick, click, confirm double-click, menu transition, error buzz, back; on/off toggle in Settings saved to NVS |
+| Battery monitoring | GPIO35 voltage divider; LiPo discharge curve with linear interpolation (bug-free segment spanning); hysteresis charging detection with smoothed voltage rate; moving average smoothing |
 
 ### Settings & Persistence
 
 | Feature | Details |
 |---|---|
-| NVS preferences | `RougePreferences` class stores volume, brightness, text size, theme, shuffle mode, and last-played position across power cycles |
+| NVS preferences | `RougePreferences` class stores volume, brightness, text size, theme, shuffle mode, haptics on/off, and last-played position across power cycles |
+| Custom arduino-esp32 framework | Custom-compiled framework with BLE disabled, FreeRTOS/ringbuf functions in flash, and `CONFIG_PM_ENABLE=y`; frees ~9KB IRAM headroom required for deep sleep; symlinked via `platform_packages` in `platformio_override.ini` |
 | Watchdog timer | 30-second hardware watchdog prevents lockup |
 | FreeRTOS display task | Display runs on Core 0 at 50ms intervals; audio processing runs on Core 1 |
 | Display mutex | `displayMutex` protects the display bus between the spinner task and the main display task |
-| Auto-dim + screen-off | Dims to ~6% brightness after 30s of inactivity; turns screen fully off after 5 min of no input (all player states); smooth fade in/out; wakes on button press |
+| Auto-dim + screen-off | Dims to ~6% brightness after 30s of inactivity; turns screen fully off after 2 min of no input (all player states); smooth fade in/out; wakes on button press |
 | 1-hour auto-stop | After 1 hour of no input while playing, playback stops automatically |
-| BT sleep disconnect | After 15 min screen-off, A2DP connection is dropped (~10–15 mA savings); auto-reconnects on wake |
-| Deep sleep | After 15 min screen-off with no active playback, enters ESP32 deep sleep (<1 mA); backlight held LOW via GPIO hold; CENTER button (GPIO4, EXT0 wakeup) wakes the device; full boot on wake with GPIO holds released before display init |
+| Deep sleep | After 3 min screen-off with no active playback (5 min total from last input), enters ESP32 deep sleep (<1 mA); backlight held LOW via GPIO hold; CENTER button (GPIO4, EXT0 wakeup) wakes the device; full boot on wake with GPIO holds released before display init |
 | Button lock | Long-press LEFT toggles button lock; all button/encoder input suppressed when locked; padlock icon shown in header; locked state visible even when screen is dimmed |
 | Resume on boot | Restores last-played artist/album/song position from NVS on startup so Play works immediately; toggleable in Settings |
 | Shuffle mode | Three modes: Off / Song-level (random within current album) / Library-wide (random artist→album→song); toggled from Settings or Center button on Now Playing; indicator shown on Now Playing screen; saved to NVS |
@@ -102,16 +102,26 @@
 
 ### Display / UI
 
+- [ ] **Carousel home screen** — replace fixed 4-icon grid with a single centered icon carousel; icons follow a curved arc path (entering lower-right, rising to center, exiting lower-left) with scale animation (small→large on enter, large→small on exit) and opacity fade (full brightness at center, dimmer at edges); position dots at bottom indicate scroll depth; encoder and LEFT/RIGHT buttons navigate; CENTER selects; fully extensible to any number of menu items without layout changes
 - [ ] **Additional font options** — DejaVu9/12/18 are now in use for content and headers; candidates for further improvement include proportional fonts or U8g2 anti-aliased fonts for a more polished look
 - [ ] **PNG album art support** — `AlbumArt.cpp` only decodes JPEG (`FF D8` check); PNG (`89 50 4E 47`) embedded art is silently skipped
 - [ ] **Scrolling song title** — long titles in Now Playing are truncated; a marquee scroll would show the full title
-- [ ] **Now Playing layout with album art** — currently art fills most of the screen; consider a compact layout showing art + title + artist + progress bar together
+- [ ] **Now Playing layout improvements** — current side-by-side layout (art left, title/artist/album right) works well; candidates for improvement: scrolling long titles, better use of vertical space below art, compact progress bar
 - [ ] **Animated playback icon** — the play/pause triangle in the control bar could animate (pulsing or spinning) while buffering
-- [ ] **Button lock mode** — a button combination (e.g. double-tap Top, or hold Left+Right simultaneously) toggles a locked state that ignores all playback controls (play/pause, skip, volume); a lock icon overlay or header indicator shows when locked so the user knows why buttons aren't responding. When the screen is dimmed and locked, any button press should still wake the display to show the lock indicator rather than silently doing nothing. Unlock uses the same combination.
+- [ ] **Button lock enhancements** — current lock (long-press LEFT) suppresses all input and shows padlock in header; candidates: wake display on button press while locked to show the lock indicator rather than silently doing nothing, alternative toggle combination (e.g. hold LEFT+RIGHT)
 
 ### Settings / Persistence
 
+- [ ] **Adjustable sleep timeouts** — allow user to select preset values for screen dim, screen off, and deep sleep timeouts from the Settings menu; presets for each (e.g. dim: 15s/30s/60s; screen off: 1/2/5 min; deep sleep: 1/3/5 min); saved to NVS
 - [ ] **Volume in Settings** — volume is encoder-activated from Now Playing, but not visible or adjustable from the Settings menu directly
+
+### Games
+
+- [ ] **Snake** — D-pad buttons (TOP/BOTTOM/LEFT/RIGHT) control direction; 240×240 sprite canvas gives a natural square play area; haptic tick on move, buzz on death; accessible from main menu
+- [ ] **Space Invaders** — encoder controls left/right movement; CENTER button fires; works best on 320-wide for horizontal play space; haptics on shoot and enemy hit; music playback continues in background
+- [ ] **Breakout / Arkanoid** — encoder controls paddle (mirrors original Atari dial cabinet feel); CENTER button launches ball; haptics on brick hit and wall bounce; naturally fits the hardware
+- [ ] **Pong** — encoder controls one paddle; TOP/BOTTOM buttons control second paddle for 2-player on same device; or single-player vs AI
+- [ ] **Tetris** — encoder rotates pieces; LEFT/RIGHT moves; BOTTOM hard drops; haptic feedback on line clear and piece lock
 
 ### Infrastructure / Code Health
 

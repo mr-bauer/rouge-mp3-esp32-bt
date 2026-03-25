@@ -15,7 +15,7 @@ A hand-built portable audio player based on the Adafruit Feather ESP32 V2. Music
 - Remembers last-played position across power cycles; Play works immediately on reboot
 - Haptic feedback (DRV2605L) with distinct effects for scroll, select, back, and error
 - Battery monitoring with percentage and charging indicator in the status bar
-- Deep sleep after 15 min of inactivity (not playing) — CENTER button wakes the device; <1 mA in sleep
+- Deep sleep after 5 min of inactivity (not playing) — CENTER button wakes the device; <1 mA in sleep
 - Flicker-free display via LovyanGFX off-screen sprite rendering and DMA transfer
 
 See [Features.md](Features.md) for a complete feature list and the full roadmap.
@@ -210,6 +210,7 @@ All settings are saved to NVS flash and restored on every boot.
 | Text size | Settings → Text Size (cycles Small → Medium → Large) | Small, Medium, Large |
 | Theme | Settings → Theme | Dark, Light |
 | Shuffle | Settings → Shuffle, or Center button on Now Playing | Off, Song, Library |
+| Haptics | Settings → Haptics | On, Off |
 | Resume on boot | Settings → Resume on Boot | On, Off |
 
 ---

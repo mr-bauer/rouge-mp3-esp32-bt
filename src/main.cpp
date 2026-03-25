@@ -170,18 +170,8 @@ void loop()
             Serial.println("[SLEEP] Screen off — entering sleep mode");
         }
 
-        // Tiered BT disconnect: after 15 min of screen-off and not playing, drop A2DP connection
-        if (!btDisconnectedBySleep && bluetoothConnected &&
-            player_state != STATE_PLAYING &&
-            millis() - sleepStartMs >= BT_SLEEP_TIMEOUT_MS) {
-            disconnectBluetooth();
-            btDisconnectedBySleep = true;
-            Serial.println("[SLEEP] BT disconnected by 15-min sleep timer");
-            return; // don't evaluate deep sleep on the same iteration as BT disconnect
-        }
-
-        // Deep sleep: 15 min screen-off + not playing → full power-off until CENTER press
-        if (millis() - sleepStartMs >= BT_SLEEP_TIMEOUT_MS && player_state != STATE_PLAYING) {
+        // Deep sleep: 5 min screen-off + not playing → full power-off until CENTER press
+        if (millis() - sleepStartMs >= DEEP_SLEEP_TIMEOUT_MS && player_state != STATE_PLAYING) {
             Serial.println("[SLEEP] Entering deep sleep — press CENTER to wake");
             Serial.flush();
             // Block the display task (Core 0) so it can't render during sleep entry
@@ -217,16 +207,9 @@ void loop()
 
     // ── NORMAL MODE ─────────────────────────────────────────────────────────
 
-    // Waking from sleep: reset session timer; auto-reconnect BT if needed
+    // Waking from sleep: reset session timer
     if (sleepStartMs != 0) {
         sleepStartMs = 0;
-        if (btDisconnectedBySleep) {
-            btDisconnectedBySleep = false;
-            if (!bluetoothConnected) {
-                Serial.println("[SLEEP] Waking — auto-reconnecting BT");
-                reconnectBluetooth();
-            }
-        }
     }
 
     audioLoop();
